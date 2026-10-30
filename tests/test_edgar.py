@@ -260,3 +260,59 @@ def test_rate_limit_applies_to_network_requests_only(tmp_path, sleeps, monkeypat
 
     client.get(DOC_URL, cache=False)  # 2nd real request, 0s after the first
     assert sleeps == [pytest.approx(1 / 8)]
+
+
+# ---- exhibits -------------------------------------------------------------
+
+EARNINGS_8K = edgar.Filing(
+    cik=320193,
+    ticker="AAPL",
+    company="Apple Inc.",
+    accession="0000320193-25-000077",
+    form="8-K",
+    filed_date=date(2025, 10, 30),
+    accepted_at=None,
+    report_date=date(2025, 10, 30),
+    items=("2.02", "9.01"),
+    primary_document="aapl-20251030.htm",
+)
+INDEX_PATH = "/Archives/edgar/data/320193/000032019325000077/0000320193-25-000077-index.htm"
+
+# Trimmed copy of a real EDGAR filing index page.
+INDEX_HTML = """<html><body>
+<table class="tableFile" summary="Document Format Files">
+  <tr><th scope="col">Seq</th><th scope="col">Description</th><th scope="col">Document</th>
+      <th scope="col">Type</th><th scope="col">Size</th></tr>
+  <tr><td>1</td><td>8-K</td>
+      <td><a href="/ix?doc=/Archives/edgar/data/320193/000032019325000077/aapl-20251030.htm">aapl-20251030.htm</a></td>
+      <td>8-K</td><td>31207</td></tr>
+  <tr><td>2</td><td>EX-99.1</td>
+      <td><a href="/Archives/edgar/data/320193/000032019325000077/a8-kex991q4202509272025.htm">a8-kex991q4202509272025.htm</a></td>
+      <td>EX-99.1</td><td>123456</td></tr>
+  <tr><td>3</td><td>GRAPHIC</td>
+      <td><a href="/Archives/edgar/data/320193/000032019325000077/logo.jpg">logo.jpg</a></td>
+      <td>GRAPHIC</td><td>2048</td></tr>
+  <tr><td>&nbsp;</td><td>Complete submission text file</td>
+      <td>&nbsp;</td><td>&nbsp;</td><td>99999</td></tr>
+</table>
+</body></html>"""
+
+
+def test_index_url():
+    assert EARNINGS_8K.index_url == "https://www.sec.gov" + INDEX_PATH
+
+
+def test_exhibits_parses_index_page(tmp_path):
+    def handler(request):
+        if request.url.path == INDEX_PATH:
+            return httpx.Response(200, text=INDEX_HTML)
+        return httpx.Response(404)
+
+    client, paths = make_edgar(tmp_path, handler=handler)
+    base = "https://www.sec.gov/Archives/edgar/data/320193/000032019325000077/"
+    assert client.exhibits(EARNINGS_8K) == [
+        ("8-K", base + "aapl-20251030.htm"),  # "/ix?doc=" prefix stripped
+        ("EX-99.1", base + "a8-kex991q4202509272025.htm"),
+        ("GRAPHIC", base + "logo.jpg"),
+    ]
+    assert paths == [INDEX_PATH]

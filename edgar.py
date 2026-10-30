@@ -4,9 +4,10 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()  # reads your .env file
@@ -14,6 +15,7 @@ HEADERS = {"User-Agent": os.environ["SEC_USER_AGENT"]}
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
+SEC_BASE_URL = "https://www.sec.gov"
 
 MAX_REQUESTS_PER_SECOND = 8  # SEC limit is 10; we stay under it
 RETRY_STATUSES = {403, 429, 500, 502, 503, 504}
@@ -40,6 +42,15 @@ class Filing:
         return (
             f"https://www.sec.gov/Archives/edgar/data/"
             f"{self.cik}/{accession_no_dashes}/{self.primary_document}"
+        )
+
+    @property
+    def index_url(self) -> str:
+        # The filing's index page lists every document in it (main document, exhibits, XBRL).
+        accession_no_dashes = self.accession.replace("-", "")
+        return (
+            f"https://www.sec.gov/Archives/edgar/data/"
+            f"{self.cik}/{accession_no_dashes}/{self.accession}-index.htm"
         )
 
 
@@ -218,6 +229,36 @@ class EdgarClient:
     def download(self, filing: Filing) -> bytes:
         """Return the bytes of the filing's primary document (cached on disk)."""
         return self.get(filing.primary_url)
+
+    def exhibits(self, filing: Filing) -> list[tuple[str, str]]:
+        """Return (document type, url) for every document on the filing's index page.
+
+        e.g. [("8-K", ".../aapl-20251030.htm"), ("EX-99.1", ".../a8-kex991.htm"), ...]
+        """
+        # Cached like any document: an index page never changes once filed.
+        soup = BeautifulSoup(self.get(filing.index_url), "lxml")
+        results = []
+        for table in soup.find_all("table", class_="tableFile"):
+            rows = table.find_all("tr")
+            if not rows:
+                continue
+            # Find the columns by header name instead of assuming positions.
+            headers = [th.get_text(strip=True) for th in rows[0].find_all("th")]
+            if "Document" not in headers or "Type" not in headers:
+                continue
+            doc_col, type_col = headers.index("Document"), headers.index("Type")
+            for row in rows[1:]:
+                cells = row.find_all("td")
+                if len(cells) <= max(doc_col, type_col):
+                    continue
+                link = cells[doc_col].find("a")
+                if link is None:
+                    continue
+                # Inline XBRL documents link to the SEC's viewer: "/ix?doc=/Archives/...".
+                # Strip that prefix to get the document itself.
+                href = link["href"].removeprefix("/ix?doc=")
+                results.append((cells[type_col].get_text(strip=True), urljoin(SEC_BASE_URL, href)))
+        return results
 
 
 if __name__ == "__main__":
