@@ -26,14 +26,15 @@ FORMS = ["10-K", "10-Q", "8-K"]
 LOOKBACK_DAYS = 400  # long enough to include the latest 10-K
 PREVIEW_CHARS = 80
 
-# form -> {section key: minimum chars}. 0 means "must be present, any length":
-# a 10-Q's II-1A is often just "no material changes since our 10-K".
+# form -> {section key: minimum chars}. These match scripts/miss_report.py.
+# Not required: 10-K 7A (some filers fold market risk into MD&A, e.g. MCD) and
+# 10-Q Part II Item 1A (the SEC lets a company leave it out, e.g. XOM).
 REQUIRED = {
     "10-K": {"1A": 5_000, "7": 5_000},
-    "10-Q": {"I-2": 5_000, "II-1A": 0},
-    "8-K": {"2.02": 0},
+    "10-Q": {"I-2": 2_000},
 }
-MIN_PRESS_RELEASE_CHARS = 1_000  # 8-K: at least one EX-99 exhibit this long
+# 8-K: covered if an EX-99.* exhibit or the Item 2.02/8.01 body has at least this many chars.
+MIN_EARNINGS_TEXT_CHARS = 1_000
 
 # Each filing ends up in exactly one of these buckets.
 OK, MISS, NON_STANDARD, NOT_CHECKED = "ok", "miss", "non-standard layout", "not checked"
@@ -43,15 +44,15 @@ def find_problems(form: str, sections: list[Section]) -> list[str]:
     """Return what is missing or too short for this form (empty list = fine)."""
     problems = []
     by_key = {s.key: s for s in sections}
-    for key, min_chars in REQUIRED[form].items():
+    for key, min_chars in REQUIRED.get(form, {}).items():
         if key not in by_key:
             problems.append(f"{key} missing")
         elif by_key[key].char_count < min_chars:
             problems.append(f"{key} only {by_key[key].char_count:,} chars")
     if form == "8-K":
-        exhibits = [s for s in sections if s.source.startswith("EX-99")]
-        if not any(s.char_count >= MIN_PRESS_RELEASE_CHARS for s in exhibits):
-            problems.append(f"no EX-99 exhibit with at least {MIN_PRESS_RELEASE_CHARS:,} chars")
+        text_sections = [s for s in sections if s.source.startswith("EX-99") or s.key in ("2.02", "8.01")]
+        if not any(s.char_count >= MIN_EARNINGS_TEXT_CHARS for s in text_sections):
+            problems.append(f"no EX-99 exhibit or Item 2.02/8.01 text of at least {MIN_EARNINGS_TEXT_CHARS:,} chars")
     return problems
 
 

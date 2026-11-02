@@ -1,0 +1,32 @@
+# One ticker per line. Anything after a # is ignored.
+# Tech
+AAPL
+MSFT
+NVDA
+AMZN
+GOOGL
+META
+# Financials
+JPM
+BAC
+GS
+# Energy
+XOM
+CVX
+# Health care
+JNJ
+PFE
+UNH
+# Consumer
+WMT
+COST
+HD
+NKE
+MCD
+KO
+PEP
+# Media and chips
+DIS
+NFLX
+INTC
+AMD

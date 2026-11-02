@@ -109,3 +109,113 @@ def test_10k_keeps_only_relevant_items(tmp_path):
     ten_k = replace(EARNINGS_8K, form="10-K", items=(), primary_document="aapl-10k.htm")
     sections = ingest.process(client, ten_k)
     assert [s.key for s in sections] == ["1A", "7", "7A"]
+
+
+# ---- the command-line tool (run, read_tickers, resuming) -------------------
+
+import json
+
+
+def folder(accession):
+    return f"/Archives/edgar/data/320193/{accession.replace('-', '')}/"
+
+
+def submissions_json():
+    rows = [  # (accession, form, filed, items, document)
+        ("0000320193-25-000066", "10-K", "2025-10-31", "", "aapl-10k.htm"),
+        ("0000320193-25-000077", "8-K", "2025-10-30", "2.02,9.01", "aapl-8k.htm"),
+        ("0000320193-25-000050", "8-K", "2025-08-01", "5.02", "other.htm"),  # not earnings
+        ("0000320193-25-000040", "8-K", "2025-07-31", "2.02", "broken.htm"),  # 404s
+    ]
+    recent = {
+        "accessionNumber": [r[0] for r in rows],
+        "form": [r[1] for r in rows],
+        "filingDate": [r[2] for r in rows],
+        "acceptanceDateTime": [""] * len(rows),
+        "reportDate": [""] * len(rows),
+        "items": [r[3] for r in rows],
+        "primaryDocument": [r[4] for r in rows],
+    }
+    return json.dumps({"name": "Apple Inc.", "filings": {"recent": recent, "files": []}})
+
+
+ROUTES["/files/company_tickers.json"] = json.dumps({"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple"}})
+ROUTES["/submissions/CIK0000320193.json"] = submissions_json()
+ROUTES[folder("0000320193-25-000066") + "aapl-10k.htm"] = TEN_K_HTML
+ROUTES[folder("0000320193-25-000050") + "other.htm"] = "<p>Item 5.02 Departure of Directors</p><p>Text.</p>"
+
+
+def read_lines(path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_read_tickers_handles_comments_blanks_and_duplicates(tmp_path):
+    tickers_file = tmp_path / "t.txt"
+    tickers_file.write_text("# tech\naapl\n\nMSFT  # the big one\n  # nothing\nAAPL\n", encoding="utf-8")
+    assert ingest.read_tickers(["nvda", "MSFT"], tickers_file) == ["NVDA", "MSFT", "AAPL"]
+
+
+def test_run_writes_one_line_per_filing_and_survives_a_failure(tmp_path):
+    client, _ = make_client(tmp_path / "cache")
+    out = tmp_path / "filings.jsonl"
+    stats = ingest.run(client, ["AAPL"], ["10-K", "8-K"], None, out)
+
+    assert stats.ok == {"10-K": 1, "8-K": 1}
+    assert stats.failed == 1  # the 8-K whose document 404s; the run still finished
+    records = read_lines(out)
+    assert len(records) == 2  # the non-earnings 8-K was filtered out; the failure wasn't written
+    eight_k = next(r for r in records if r["filing"]["form"] == "8-K")
+    assert eight_k["filing"]["accession"] == "0000320193-25-000077"
+    assert eight_k["filing"]["items"] == ["2.02", "9.01"]
+    assert eight_k["filing"]["filed_date"] == "2025-10-30"
+    assert eight_k["filing"]["primary_url"].endswith("/aapl-8k.htm")
+    assert [s["key"] for s in eight_k["sections"]] == ["2.02", "EX-99.1", "EX-99.2"]
+    assert eight_k["sections"][0]["char_count"] == len(eight_k["sections"][0]["text"])
+
+
+def test_rerun_skips_finished_filings_and_retries_failures(tmp_path):
+    client, _ = make_client(tmp_path / "cache")
+    out = tmp_path / "filings.jsonl"
+    ingest.run(client, ["AAPL"], ["10-K", "8-K"], None, out)
+    stats = ingest.run(client, ["AAPL"], ["10-K", "8-K"], None, out)
+
+    assert stats.skipped == 2
+    assert stats.failed == 1  # retried, and failed again
+    assert len(read_lines(out)) == 2  # nothing written twice
+
+
+def test_all_8ks_includes_non_earnings_and_counts_no_sections(tmp_path):
+    client, _ = make_client(tmp_path / "cache")
+    out = tmp_path / "filings.jsonl"
+    stats = ingest.run(client, ["AAPL"], ["8-K"], None, out, earnings_only=False)
+
+    assert stats.no_sections == 1  # the 5.02 8-K has no wanted section...
+    other = next(r for r in read_lines(out) if r["filing"]["accession"] == "0000320193-25-000050")
+    assert other["sections"] == []  # ...but it is still recorded, so miss_report can see it
+
+
+def test_max_per_ticker_keeps_the_most_recent_of_each_form(tmp_path):
+    client, _ = make_client(tmp_path / "cache")
+    out = tmp_path / "filings.jsonl"
+    ingest.run(client, ["AAPL"], ["8-K"], None, out, max_per_ticker=1)
+    assert [r["filing"]["accession"] for r in read_lines(out)] == ["0000320193-25-000077"]
+
+
+def test_truncated_last_line_is_ignored_and_not_glued_to_the_next_record(tmp_path):
+    client, _ = make_client(tmp_path / "cache")
+    out = tmp_path / "filings.jsonl"
+    out.write_text('{"filing": {"accession": "0000320193-25-0000', encoding="utf-8")  # crash mid-write
+    ingest.run(client, ["AAPL"], ["10-K"], None, out)
+
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith('{"filing": {"accession": "0000320193-25-0000')
+    assert json.loads(lines[1])["filing"]["form"] == "10-K"
+
+
+def test_record_lists_every_item_heading_found_not_just_the_kept_ones(tmp_path):
+    client, _ = make_client(tmp_path / "cache")
+    out = tmp_path / "filings.jsonl"
+    ingest.run(client, ["AAPL"], ["10-K"], None, out)
+    record = read_lines(out)[0]
+    assert [s["key"] for s in record["sections"]] == ["1A", "7", "7A"]  # kept
+    assert record["item_keys_found"] == ["1", "1A", "7", "7A", "8"]  # all found
