@@ -19,7 +19,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from parse import Section, find_cross_references  # noqa: E402
+import re  # noqa: E402
+
+# _looks_like_table_of_contents is reused (not copied) so this report and parse.py can never
+# disagree about what a table of contents is.
+from parse import Section, _looks_like_table_of_contents, find_cross_references  # noqa: E402
 
 # form -> {required section key: minimum characters for it to count as a real section}.
 REQUIRED = {
@@ -51,7 +55,7 @@ def check_filing(record: dict) -> dict | None:
     if form not in FORMS:
         return None
     sections = {s["key"]: s for s in record["sections"]}
-    result = {"outcome": OK, "absent": [], "too_short": {}, "optional_absent": [], "mismatch": False}
+    result = {"outcome": OK, "absent": [], "too_short": {}, "optional_absent": [], "mismatch": False, "pointers": {}}
 
     if form == "8-K":
         if "2.02" not in filing["items"]:
@@ -81,7 +85,54 @@ def check_filing(record: dict) -> dict | None:
             pointers = set(find_cross_references(as_sections))
             if set(result["too_short"]) <= pointers:
                 result["outcome"] = NON_STANDARD
+                # key -> (how it points elsewhere, its text), for the layout breakdown
+                result["pointers"] = {
+                    key: (pointer_kind(sections[key]["text"]), sections[key]["text"]) for key in result["too_short"]
+                }
     return result
+
+
+def pointer_kind(text: str) -> str:
+    """How a section that find_cross_references already flagged points elsewhere (report labels only):
+
+      "toc"  - only a list of sub-topics with page numbers ("Introduction | 4")
+      "page" - names pages: "appears on pages 46-160"
+      "name" - names a place without a page: "presented in the Financial Table of Contents"
+    """
+    if _looks_like_table_of_contents(text):
+        return "toc"
+    if re.search(r"\bpages?\s+\d+", text, re.IGNORECASE):
+        return "page"
+    return "name"  # it was flagged, so by elimination it uses a pointer phrase
+
+
+# What each kind of pointer means, in plain words (see pointer_kind).
+LAYOUT_MEANING = {
+    "toc": "only a list of sub-topics with page numbers, no body heading",
+    "page": "names the pages that hold the text",
+    "name": "names where the text is (e.g. a Financial Table of Contents), no page",
+}
+EXAMPLE_CHARS = 130
+
+
+def layout_groups(non_standard: list[tuple[dict, dict]]) -> list[dict]:
+    """Group non-standard filings by (ticker, form): how many, which sections, which kinds of pointer."""
+    groups = {}
+    for record, result in non_standard:
+        filing = record["filing"]
+        group = groups.setdefault(
+            (filing["ticker"], filing["form"]),
+            {"ticker": filing["ticker"], "form": filing["form"], "filings": 0, "keys": set(),
+             "kinds": Counter(), "example_date": "", "example_text": ""},
+        )
+        group["filings"] += 1
+        group["keys"].update(result["pointers"])
+        group["kinds"].update({kind for kind, _ in result["pointers"].values()})  # once per filing
+        if filing["filed_date"] > group["example_date"]:  # show the latest filing as the example
+            first_key = sorted(result["pointers"])[0]
+            group["example_date"] = filing["filed_date"]
+            group["example_text"] = " ".join(result["pointers"][first_key][1].split())[:EXAMPLE_CHARS]
+    return sorted(groups.values(), key=lambda g: (g["ticker"], g["form"]))
 
 
 def percent(count: int, total: int) -> str:
@@ -108,6 +159,7 @@ def main():
     optional = defaultdict(Counter)  # (form, key) -> counts of: checked, absent
     mismatches = []  # (record, result)
     offenders = []  # (record, result)
+    non_standard = []  # (record, result)
     bad_lines = 0
     with args.jsonl.open(encoding="utf-8") as f:
         for line in f:
@@ -128,6 +180,7 @@ def main():
                 counts["ok"] += 1
             elif result["outcome"] == NON_STANDARD:
                 counts["non-standard"] += 1
+                non_standard.append((record, result))
             else:
                 counts["absent" if result["absent"] else "too short"] += 1
                 offenders.append((record, result))
@@ -148,6 +201,14 @@ def main():
     print("(miss rate = absent + too short, as a share of all filings of that form)")
     if bad_lines:
         print(f"({bad_lines} unreadable lines ignored)")
+
+    if non_standard:
+        print(f"\nNon-standard layouts: {len(non_standard)} filings whose text is elsewhere (we only have a pointer):")
+        for group in layout_groups(non_standard):
+            layout = "; ".join(f"{LAYOUT_MEANING[kind]} ({n})" for kind, n in group["kinds"].most_common())
+            print(f"  {group['ticker']:<6} {group['form']:<5} {group['filings']:>3} filings   sections: {', '.join(sorted(group['keys']))}")
+            print(f"         layout: {layout}")
+            print(f"         e.g. {group['example_date']}: \"{group['example_text']}\"")
 
     print("\nOptional sections (not counted as misses):")
     for (form, key), c in sorted(optional.items()):

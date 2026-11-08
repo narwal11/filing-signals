@@ -19,8 +19,20 @@
 | 1     | Title fallback for annual-report-style 10-Ks (MCD, INTC) | 7.0% (10/142)  | 0.0% (0/422) | 1.0% (6/583) |
 | 2     | Tolerant titles, footer cleanup, stricter min-length check; 7A made optional; 8-K body text accepted as coverage | 0.0% (0/142) | 0.0% (0/422) | 0.0% (0/583) |
 
-Note: of the 22 original misses, 16 were fixed by parser changes and 6 were resolved
-by redefining coverage (MCD 7A optional: 6 filings ...). 10-K 7A found in X% of filings.
+Note: of the 22 original misses, 10 were fixed by parser changes alone (INTC 6, COST 4).
+6 MCD filings had 1A and 7 fixed by the parser, with 7A reclassified as optional (MCD folds
+market risk into MD&A). 6 earnings 8-Ks were resolved by redefining coverage: 5 accepted
+via substantial 8-K body text (CVX ×2, BAC, GS, PFE) and 1 flagged as an SEC metadata
+mismatch (PFE 2023-12-14).
+
+**Non-standard layouts are excluded from the miss rate but reported here:** 12 of 142
+10-Ks (8.5%) and 35 of 422 10-Qs (8.3%) use layouts the parser does not split (e.g., JPM's
+cross-reference format). **Usable coverage** (all expected sections found):
+10-K 91.5% (130/142), 10-Q 91.7% (387/422), 8-K 100.0% (583/583).
+
+Optional sections: 10-K Item 7A found in 95.8% (136/142); 10-Q Part II Item 1A found in
+87.2% (368/422).
+
 
 ## Phase 1: Spot-check accuracy (hand-checked)
 
