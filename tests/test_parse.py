@@ -566,3 +566,20 @@ def test_table_rows_are_not_mistaken_for_footers():
     rows = "\n".join(f"Revenue year | {n}" for n in range(1, 8))
     text = f"Item 7. Management's Discussion and Analysis\n\n{rows}\n"
     assert sections_by_key(text)["7"].text == rows
+
+
+def test_pointer_without_a_page_number_is_a_cross_reference():
+    # Regression (CVX 10-K 2023-2026): "presented in the Financial Table of Contents", no page.
+    text = (
+        "Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations\n"
+        "The index to Management's Discussion and Analysis of Financial Condition and Results of "
+        "Operations is presented in the Financial Table of Contents.\n"
+        "Item 7A. Quantitative and Qualitative Disclosures About Market Risk\n"
+        "Not applicable.\n"
+    )
+    assert find_cross_references(split_sections(text, "10-K")) == ["7"]
+
+
+def test_ordinary_short_section_with_the_word_see_is_not_a_cross_reference():
+    text = "Item 7A. Quantitative and Qualitative Disclosures About Market Risk\nNot required. See our other disclosures.\n"
+    assert find_cross_references(split_sections(text, "10-K")) == []

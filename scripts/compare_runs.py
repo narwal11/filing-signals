@@ -16,12 +16,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 SMALL_CHANGE = 0.05  # up to 5% shorter or longer counts as "cleanup only"
-MIN_REAL_SECTION_CHARS = 1_000  # same idea as parse.py: fewer than 3 of these = Item headings failed
-MIN_REAL_SECTIONS = 3
 
 
 def load(path: Path) -> dict:
-    """accession -> (ticker, form, filed date, url, {section key: char count})."""
+    """accession -> (ticker, form, filed date, url, {section key: char count}, number of item headings found)."""
     filings = {}
     with path.open(encoding="utf-8") as f:
         for line in f:
@@ -30,19 +28,25 @@ def load(path: Path) -> dict:
             record = json.loads(line)
             filing = record["filing"]
             sizes = {s["key"]: s["char_count"] for s in record["sections"]}
+            found = record.get("item_keys_found")  # only in newer files
             filings[filing["accession"]] = (
                 filing["ticker"], filing["form"], filing["filed_date"], filing["primary_url"], sizes,
+                None if found is None else len(found),
             )
     return filings
 
 
-def likely_reason(form: str, old: dict, new: dict, added: list, removed: list) -> str:
-    """A best guess, from the data alone, of which parser change caused a key difference."""
-    real_old = sum(1 for n in old.values() if n >= MIN_REAL_SECTION_CHARS)
-    if form == "10-K" and real_old < MIN_REAL_SECTIONS:
-        return "title-heading fallback (the Item headings found almost nothing before)"
-    if added and form == "10-K":
-        return "long heading with a variant title is now accepted"
+# A 10-K split by its "Item N" headings finds 20+ distinct items; one split by plain
+# titles (the annual-report fallback) finds about ten.
+MANY_ITEM_HEADINGS = 15
+
+
+def likely_reason(form: str, items_found_new, added: list) -> str:
+    """A best guess of which parser change caused a key difference. Inferred, not recorded."""
+    if form == "10-K" and items_found_new is not None:
+        if items_found_new >= MANY_ITEM_HEADINGS:
+            return "Item heading now accepted (long heading with a variant title)"
+        return "title-heading fallback (the filing has no usable Item headings)"
     if added:
         return "section found that was missed before"
     return "section no longer returned (check this one by hand)"
@@ -64,8 +68,8 @@ def main():
     key_changes = []  # filings whose set of sections changed
     size_changes = []  # filings with a section more than 5% different
     for accession in both:
-        ticker, form, filed, url, old_sizes = old[accession]
-        new_sizes = new[accession][4]
+        ticker, form, filed, url, old_sizes, _ = old[accession]
+        new_sizes, items_found_new = new[accession][4], new[accession][5]
         added = sorted(set(new_sizes) - set(old_sizes))
         removed = sorted(set(old_sizes) - set(new_sizes))
         big = {
@@ -75,7 +79,7 @@ def main():
         }
         if added or removed:
             counts[form, "sections added/removed"] += 1
-            key_changes.append((ticker, form, filed, url, added, removed, likely_reason(form, old_sizes, new_sizes, added, removed)))
+            key_changes.append((ticker, form, filed, url, added, removed, likely_reason(form, items_found_new, added)))
         elif big:
             counts[form, "a section changed by more than 5%"] += 1
             size_changes.append((ticker, form, filed, url, big))

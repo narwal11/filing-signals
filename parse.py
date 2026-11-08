@@ -455,8 +455,19 @@ CROSS_REFERENCE_KEYS = ["1A", "7", "7A", "I-2"]
 # A real Item 7 is tens of thousands of characters. A pointer is a sentence or two.
 MAX_CROSS_REFERENCE_CHARS = 2_000
 
-# "appears on pages 46-160", "on page 133", ...
-PAGE_REFERENCE_RE = re.compile(r"\bpages?\s+\d+", re.IGNORECASE)
+# Wording that points somewhere else instead of containing the text:
+#   "appears on pages 46-160", "on page 133"        -> a page number
+#   "is presented in the Financial Table of Contents" (CVX), "appears in", "refer to",
+#   "is included/set forth/contained in"             -> a pointer verb
+# Bare "see" is left out on purpose: it is too common in ordinary short sections.
+PAGE_REFERENCE_RE = re.compile(
+    r"\bpages?\s+\d+"
+    r"|\bpresented\s+(?:in|on)\b"
+    r"|\bappears?\s+(?:in|on)\b"
+    r"|\brefer\s+to\b"
+    r"|\bis\s+(?:included|set\s+forth|contained)\s+in\b",
+    re.IGNORECASE,
+)
 
 # A table-of-contents line ends with a page number: "Introduction | 4".
 TOC_LINE_RE = re.compile(r"\|\s*\d+\s*$")
