@@ -18,6 +18,19 @@
 | 0     | Baseline                                       | 11.3% (16/142) | 0.0% (0/422) | 1.0% (6/583) |
 | 1     | Title fallback for annual-report-style 10-Ks (MCD, INTC) | 7.0% (10/142)  | 0.0% (0/422) | 1.0% (6/583) |
 | 2     | Tolerant titles, footer cleanup, stricter min-length check; 7A made optional; 8-K body text accepted as coverage | 0.0% (0/142) | 0.0% (0/422) | 0.0% (0/583) |
+| 3     | Boundary fixes from spot check A: 8-K items end at SIGNATURES / exhibit index, combined 8-K headings, title fallback skips the table of contents; page-noise and SEC exhibit-header removal; heading line kept in section text | 0.0% (0/143) | 0.0% (0/430) | 0.0% (0/587) |
+
+Note on round 3 totals: the counts rose from 142/422/583 to 143/430/587 (and non-standard from
+47 to 48) because 13 filings came out after round 2 (AAPL 10-K and 8-K; 10-Qs from AMD, MCD, PFE,
+CVX, UNH, GS, JPM, XOM; 8-Ks from AMD, MCD, PFE), not because of any parser change. The "Dataset"
+line above describes rounds 0–2. On the 1,147 filings in both rounds no outcome changed; all 13 new filings
+are ok except one new JPM 10-Q (non-standard). From round 3 on, section text starts with its
+heading line and has page footers removed, so character counts are not comparable with earlier
+rounds. Round 3 changed boundaries in 6 INTC 10-K Item 7s (start moved past 60–92K chars of
+table of contents and business text) and 33 8-K items in 31 filings (KO 24, XOM 4, CVX 2, BAC,
+GS, PFE: exhibit index and signatures removed). Round 3 usable coverage: 10-K 91.6% (131/143),
+10-Q 91.6% (394/430), 8-K 100.0% (587/587); non-standard 48 filings (JPM 6 10-Ks and 18 10-Qs,
+INTC 18 10-Qs, CVX 6 10-Ks).
 
 Note: of the 22 original misses, 10 were fixed by parser changes alone (INTC 6, COST 4).
 6 MCD filings had 1A and 7 fixed by the parser, with 7A reclassified as optional (MCD folds
@@ -62,14 +75,47 @@ filings. Sections from one filing are not independent, so the interval is somewh
 - **Non-standard layout (JPM):** Item 7 is a cross-reference to the MD&A elsewhere.
 - **Title-fallback sections end too late (INTC 1A, 7, 7A):** they stop only at the next standard
   title, so they run through non-standard headings ("Rule 10b5-1 Trading Arrangements",
-  "Critical Accounting Estimates"). Found by spot check; not fixed (needs a page-based split).
-- **Last 8-K item runs to the end of the document (XOM 2.02):** no "Item 9.01" heading, so 2.02
-  includes the exhibit index and signatures; the combined "Item 2.02 / Item 7.01" heading also
-  gives both items the same text. Found by spot check; not fixed.
+  "Critical Accounting Estimates"). Found by spot check. **Known limitation, not fixed in round 3**
+  (see below).
+- **Title-fallback section starts in the table of contents (INTC 7):** the main TOC lists
+  "Management's Discussion and Analysis" on its own line, and that line was taken as the heading.
+  Fixed in round 3: a title line followed by TOC entries is skipped.
+- **Last 8-K item runs to the end of the document (XOM 2.02, KO, CVX, BAC, GS, PFE):** with no
+  "Item 9.01" heading, the last item included the exhibit index and signatures. The combined
+  "Item 2.02 / Item 7.01" heading also needed both keys. Fixed in round 3: 8-K items end at
+  SIGNATURES / INDEX TO EXHIBITS / EXHIBIT INDEX, and one heading line can open several items.
+- **Page noise inside sections (UNH, DIS, MSFT, NKE, COST, …):** page footers like
+  "35 Table of Contents", running headers like "48 PART II", and trailing page numbers. Fixed in
+  round 3.
+- **SEC packaging line on exhibits:** every exhibit started with "EX-99.1 2 file.htm EX-99.1".
+  Fixed in round 3 (one MSFT EX-99.3 held nothing else and is now dropped as empty).
+
+### Known limitation: INTC 10-K section ends
+INTC's 10-K is in annual-report order, and the parser only ends a title-fallback section at the
+next *standard* title. Boundaries from the hand check of the 2026-01-23 filing (sample A):
+
+| Section | Parser ends at | Real end |
+|---------|----------------|----------|
+| 1A | After "Other Key Information" (incl. "Rule 10b5-1 Trading Arrangements"), at "Cybersecurity" | "...requiring us to alter manufacturing and assembly and test processes." (end of the environmental regulations risk, p.51) |
+| 7 | Stops at "Properties" (p.32), which Intel places *inside* MD&A | Runs on through Market Risk (p.33) and Critical Accounting Estimates (p.34), which are also MD&A |
+| 7A | After Critical Accounting Estimates (Inventories ... Loss Contingencies), at "Risk Factors" on p.37 | "...mitigate the risk of a potential supplier concentration for our key commodities." (end of Commodity Price Risk, p.34) |
+
+The Item 7 *start* (main table of contents instead of the real MD&A on p.18) was fixed in
+round 3. The other ends are the same layout in all 6 INTC 10-Ks, but only the 2026-01-23 filing
+was checked by hand. Not fixed in round 3: no general fix was clean enough. Options:
+- **A. Running-footer regions:** INTC pages carry a footer label ("Risk Factors |",
+  "MD&A |", "Other Key Information |"); a section may not cross a label change. Cheapest; fixes
+  the 1A and 7 ends, not 7A; useless for filers with one label or none (MCD).
+- **B. TOC hierarchy:** read the filer's TOC to tell group titles from sub-entries and end each
+  section at its next sibling. Would fix 7A too, but the flattened text loses most of the
+  hierarchy, so it would be fragile and tuned on one filer.
+- **C. Page-based split:** map the cross-reference index pages to page footers and cut on page
+  numbers. Most precise and also the base for resolving page pointers (Future work), but the
+  biggest build.
 
 ## Future work
-- **Resolve page pointers.** The 47 non-standard-layout filings (JPM 6 10-Ks and 17 10-Qs,
-  INTC 18 10-Qs, CVX 6 10-Ks) only contain a pointer to where the MD&A is ("appears on pages
+- **Resolve page pointers.** The non-standard-layout filings (47 in round 2, 48 in round 3: JPM
+  6 10-Ks and 18 10-Qs, INTC 18 10-Qs, CVX 6 10-Ks) only contain a pointer to where the MD&A is ("appears on pages
   46-160", "presented in the Financial Table of Contents"). They stay classified as
   non-standard for now and are not recovered in this round. A fix would follow the pointer
   inside the same document, probably by splitting on page numbers from the filer's own index and
