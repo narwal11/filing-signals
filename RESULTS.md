@@ -61,10 +61,15 @@ filings where every expected section was found.
 | Round data | Sample | 10-K | 10-Q | 8-K | All sections |
 |------------|--------|------|------|-----|--------------|
 | 2 | 20 filings, 47 sections | 85.7% (18/21) | 100.0% (14/14) | 91.7% (11/12) | 91.5% (43/47), 95% Wilson interval 80.1% to 96.6% |
+| 3 (after fixes) | Sample B: 20 new filings (excluding sample A), 47 sections | 100.0% (21/21) | 100.0% (14/14) | 100.0% (12/12) | 100.0% (47/47), 95% Wilson interval 92.4% to 100.0% |
 
 Note: this is not comparable with the miss-rate table above. It measures whether the section
-boundaries are right, not whether a section was found, and it excludes the 47 non-standard-layout
+boundaries are right, not whether a section was found, and it excludes the 48 non-standard-layout
 filings. Sections from one filing are not independent, so the interval is somewhat optimistic.
+
+Sample A was used to find and fix bugs, so it is not a fair "after" measurement.
+Sample B is a fresh random sample drawn after the fixes. Sample B happened to include
+no INTC 10-K, so the documented INTC limitation is not reflected in its score.
 
 ## Root causes found
 - **Annual-report layout (MCD, INTC):** body sections are headed by plain titles
