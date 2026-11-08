@@ -30,6 +30,11 @@ mismatch (PFE 2023-12-14).
 cross-reference format). **Usable coverage** (all expected sections found):
 10-K 91.5% (130/142), 10-Q 91.7% (387/422), 8-K 100.0% (583/583).
 
+All 47 non-standard filings come from 3 companies whose MD&A section is only a pointer
+to text elsewhere in the filing: JPM (6 10-Ks, 17 10-Qs), INTC (18 10-Qs), CVX (6 10-Ks).
+Their earnings 8-K press releases are fully covered, so all 25 companies still have
+earnings text for Phase 2.
+
 Optional sections: 10-K Item 7A found in 95.8% (136/142); 10-Q Part II Item 1A found in
 87.2% (368/422).
 
