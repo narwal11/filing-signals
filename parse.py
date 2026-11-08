@@ -111,12 +111,20 @@ def html_to_text(html: bytes | str) -> str:
 class Section:
     key: str  # item number, e.g. "1A"
     title: str  # standard item name, e.g. "Risk Factors"
-    text: str  # the section body, without its heading line
+    text: str  # the heading line, then the section body (exhibits have no heading line)
     source: str = "primary"  # which document it came from (8-Ks will also use exhibits)
+    heading: str = ""  # the heading line as written, e.g. "Item 7—MD&A ... (amounts in millions ...)"
 
     @property
     def char_count(self) -> int:
         return len(self.text)
+
+    @property
+    def body(self) -> str:
+        """The text without its heading line."""
+        if self.heading and self.text.startswith(self.heading):
+            return self.text[len(self.heading) :].lstrip("\n")
+        return self.text
 
 
 # Standard 10-K item names. Keys not in this table are ignored when splitting.
@@ -213,7 +221,35 @@ HEADING_RE = re.compile(r"[ \t]*(item[ \t]+(\d{1,2}[A-Z]?)(?:[ \t.:|\-–—].*)
 
 # 8-K items are numbered "2.02": same shape, but the number is (digits).(two digits).
 # HEADING_RE can't be reused: it would read "Item 2.02" as item "2" followed by a "." separator.
-EIGHT_K_ITEM_RE = re.compile(r"[ \t]*(item[ \t]+(\d{1,2}\.\d{2})(?:[ \t.:|\-–—].*)?)", re.IGNORECASE)
+# One heading can name several items: "Item 2.02 / Item 7.01", "Items 2.02 and 7.01".
+#   items?[ \t]+                "Item" or "Items"
+#   (\d{1,2}\.\d{2}             group 2 = the first number ...
+#    (?:[ \t]*(?:/|,|&|and)     ... then, any number of times: a "/", ",", "&" or "and",
+#       [ \t]*(?:items?[ \t]+)?     an optional repeated "Item",
+#       \d{1,2}\.\d{2})*)           and another number
+EIGHT_K_ITEM_RE = re.compile(
+    r"[ \t]*(items?[ \t]+(\d{1,2}\.\d{2}(?:[ \t]*(?:/|,|&|and)[ \t]*(?:items?[ \t]+)?\d{1,2}\.\d{2})*)"
+    r"(?:[ \t.:|\-–—].*)?)",
+    re.IGNORECASE,
+)
+ITEM_NUMBER_8K_RE = re.compile(r"\d{1,2}\.\d{2}")
+
+# An 8-K's items end where the signature block or the exhibit index starts. Without this, the
+# last item runs to the end of the document when the filer has no "Item 9.01" heading (XOM).
+END_OF_ITEMS_RE = re.compile(r"[ \t]*(?:signatures?|index to exhibits|exhibit index)[ \t]*:?[ \t]*", re.IGNORECASE)
+END_OF_ITEMS = "(end of items)"  # a heading key that ends the section before it but starts none
+END_AT_SIGNATURES_FORMS = {"8-K"}
+
+# Page furniture left over from the printed layout (spot check, round 3):
+#   "35" + "Table of Contents"   a page number, then the next page's link back to the contents
+#   "48" + "PART II"             a page number, then the next page's running header
+#   "29" + "PART I" + "Item 1B, 1C"
+PAGE_NUMBER_RE = re.compile(r"[ \t]*\d{1,3}[ \t]*")
+TOC_LINK_RE = re.compile(r"[ \t]*table of contents[ \t]*", re.IGNORECASE)
+RUNNING_HEADER_RE = re.compile(
+    r"[ \t]*(?:part[ \t]+(?:i{1,3}|iv)\b.{0,30}|items?[ \t]+\d{1,2}[A-Z]?(?:[ \t]*,[ \t]*\d{1,2}[A-Z]?)+)[ \t]*",
+    re.IGNORECASE,
+)
 
 # Finds 10-Q part lines such as "PART I — FINANCIAL INFORMATION" or "Part II".
 #   part[ \t]+   the word "Part" and at least one space
@@ -321,6 +357,32 @@ def _strip_footers(body: str, footers: set[str]) -> str:
     return re.sub(r"\n{3,}", "\n\n", kept).strip()
 
 
+def strip_page_noise(text: str) -> str:
+    """Remove page furniture: "Table of Contents" back-links (with the page number just before
+    them), and page numbers / running headers left at the very end of a section.
+
+    Bare page numbers in the MIDDLE of a text are kept on purpose: they look like footnote markers.
+    """
+    kept = []
+    for line in text.split("\n"):
+        if TOC_LINK_RE.fullmatch(line):
+            # Drop the page number printed just before the link, if that is what precedes it.
+            while kept and not kept[-1].strip():
+                kept.pop()
+            if kept and PAGE_NUMBER_RE.fullmatch(kept[-1]):
+                kept.pop()
+            continue
+        kept.append(line)
+    # At the end: page numbers and running headers ("48", "PART II", "Item 1B, 1C").
+    while kept and (
+        not kept[-1].strip()
+        or PAGE_NUMBER_RE.fullmatch(kept[-1])
+        or RUNNING_HEADER_RE.fullmatch(kept[-1])
+    ):
+        kept.pop()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
 def _build_sections(text: str, headings: list, titles: dict, form: str, footers: set[str]) -> list[Section]:
     """Turn heading positions (start of line, end of line, key) into sections."""
     # 2. Each heading appears twice: once in the table of contents, once in the body.
@@ -333,11 +395,16 @@ def _build_sections(text: str, headings: list, titles: dict, form: str, footers:
     #
     #    The span is measured from the END of the heading line, so a long TOC line
     #    like "Item 6. | Reserved | 33" can't beat a short body copy on heading length.
+    #
+    #    A combined heading ("Item 2.02 / Item 7.01") gives two keys on the same line; the
+    #    other key on that line is not a "next heading", so only later lines can end a span.
     best = {}  # key -> (span length, start, heading end, section end)
     for i, (start, heading_end, key) in enumerate(headings):
+        if key == END_OF_ITEMS:
+            continue  # an end marker ends the section before it but is not a section itself
         end = len(text)
         for next_start, _, next_key in headings[i + 1 :]:
-            if next_key != key:
+            if next_key != key and next_start >= heading_end:
                 end = next_start
                 break
         if key not in best or end - heading_end > best[key][0]:
@@ -345,7 +412,11 @@ def _build_sections(text: str, headings: list, titles: dict, form: str, footers:
 
     # 3. Build the sections in the order they appear in the document.
     ordered = sorted(best.items(), key=lambda kv: kv[1][1])  # (key, (_, start, heading_end, end))
-    bodies = [_strip_footers(text[heading_end:end].strip(), footers) for _, (_, _, heading_end, end) in ordered]
+    bodies = [
+        strip_page_noise(_strip_footers(text[heading_end:end].strip(), footers))
+        for _, (_, _, heading_end, end) in ordered
+    ]
+    heading_lines = [text[start:heading_end].strip() for _, (_, start, heading_end, _) in ordered]
 
     # 8-Ks often stack headings over one shared body:
     #     Item 2.02 Results of Operations and Financial Condition
@@ -358,8 +429,13 @@ def _build_sections(text: str, headings: list, titles: dict, form: str, footers:
             if not bodies[i]:
                 bodies[i] = bodies[i + 1]
 
-    # Skip items with nothing under the heading, e.g. "Item 6. [Reserved]".
-    return [Section(key, titles[key], body) for (key, _), body in zip(ordered, bodies) if body]
+    # Skip items with nothing under the heading, e.g. "Item 6. [Reserved]". The heading line is
+    # kept as the first line of the text: it can carry units, e.g. COST's "(amounts in millions ...)".
+    return [
+        Section(key, titles[key], f"{heading}\n{body}", heading=heading)
+        for (key, _), heading, body in zip(ordered, heading_lines, bodies)
+        if body
+    ]
 
 
 # A real section is at least this long; index lines and pointers are not.
@@ -375,15 +451,26 @@ def _real_section_count(sections: list[Section]) -> int:
     return sum(1 for s in sections if s.char_count >= MIN_REAL_SECTION_CHARS)
 
 
+def _opens_table_of_contents(lines: list[str], i: int) -> bool:
+    """True if at least 2 of the next 3 non-blank lines are contents entries ("Overview | 3").
+
+    INTC's main contents has "Management's Discussion and Analysis" on a line of its own, followed
+    by its sub-entries with page numbers. That line is a contents entry, not the MD&A heading.
+    """
+    following = [line for line in lines[i + 1 : i + 12] if line.strip()][:3]
+    return len(following) == 3 and sum(1 for line in following if TOC_LINE_RE.search(line)) >= 2
+
+
 def _find_title_headings(text: str, titles: dict) -> list:
     """Find headings that are just a standard item title on a line of its own ("RISK FACTORS")."""
     title_words = {key: _words(title) for key, title in titles.items()}
     headings = []  # (start of line, end of line, key)
+    lines = text.split("\n")
     line_start = 0
-    for line in text.split("\n"):
+    for i, line in enumerate(lines):
         line_end = line_start + len(line)
         words = _words(line)
-        if words and len(line) <= MAX_HEADING_LENGTH:
+        if words and len(line) <= MAX_HEADING_LENGTH and not _opens_table_of_contents(lines, i):
             for key, title in title_words.items():
                 is_start_of_long_title = (
                     len(title.split()) >= MIN_WORDS_FOR_TITLE_PREFIX
@@ -414,9 +501,16 @@ def split_sections(text: str, form: str) -> list[Section]:
         line_end = line_start + len(line)
         part_match = _heading_match(PART_RE, line) if uses_parts else None
         item_match = _heading_match(item_re, line, titles)
-        if part_match:
+        if form in END_AT_SIGNATURES_FORMS and END_OF_ITEMS_RE.fullmatch(line):
+            headings.append((line_start, line_end, END_OF_ITEMS))
+        elif part_match:
             current_part = part_match.group(2).upper()
             last_number = 0
+        elif item_match and form == "8-K":
+            # One 8-K heading can name several items ("Item 2.02 / Item 7.01"): one entry per item.
+            for key in ITEM_NUMBER_8K_RE.findall(item_match.group(2)):
+                if key in titles:
+                    headings.append((line_start, line_end, key))
         elif item_match:
             key = item_match.group(2).upper()
             if uses_parts:
@@ -495,5 +589,5 @@ def find_cross_references(sections: list[Section]) -> list[str]:
         for s in sections
         if s.key in CROSS_REFERENCE_KEYS
         and s.char_count <= MAX_CROSS_REFERENCE_CHARS
-        and (PAGE_REFERENCE_RE.search(s.text) or _looks_like_table_of_contents(s.text))
+        and (PAGE_REFERENCE_RE.search(s.body) or _looks_like_table_of_contents(s.body))  # not the heading
     ]

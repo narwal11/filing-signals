@@ -219,3 +219,16 @@ def test_record_lists_every_item_heading_found_not_just_the_kept_ones(tmp_path):
     record = read_lines(out)[0]
     assert [s["key"] for s in record["sections"]] == ["1A", "7", "7A"]  # kept
     assert record["item_keys_found"] == ["1", "1A", "7", "7A", "8"]  # all found
+
+
+# ---- round 3: the SEC packaging line at the top of every exhibit --------------------
+
+def test_sec_exhibit_header_line_is_removed():
+    # Real first lines of an AAPL press release exhibit.
+    text = "EX-99.1 2 a8-kex991q1202112262020.htm EX-99.1\nExhibit 99.1\nApple Reports First Quarter Results"
+    assert ingest._strip_exhibit_header(text) == "Exhibit 99.1\nApple Reports First Quarter Results"
+
+
+def test_exhibit_without_a_header_line_is_unchanged():
+    text = "Exhibit 99.1\nApple Reports First Quarter Results"
+    assert ingest._strip_exhibit_header(text) == text

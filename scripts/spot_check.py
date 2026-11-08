@@ -57,16 +57,25 @@ def expected_sections(record: dict) -> list[dict] | None:
     return None if None in wanted else wanted
 
 
-def pick_filings(records: list[dict], seed: int = SEED, quotas: dict = QUOTAS) -> list[dict]:
-    """Pick filings at random, a different company each, from those where everything was found."""
+def reviewed_filings(markdown: str) -> set[tuple[str, str, str]]:
+    """(ticker, form, date) of every filing listed in an earlier spot-check file."""
+    return {m.groups() for m in map(FILING_HEADING_RE.match, markdown.splitlines()) if m}
+
+
+def pick_filings(records: list[dict], seed: int = SEED, quotas: dict = QUOTAS, exclude: set = frozenset()) -> list[dict]:
+    """Pick filings at random, a different company each, from those where everything was found.
+
+    `exclude` holds (ticker, form, date) of filings already reviewed, so a new sample is fresh.
+    """
     eligible = defaultdict(lambda: defaultdict(list))  # form -> ticker -> [records]
     for record in records:
         result = check_filing(record)
+        filing = record["filing"]
         # Only filings the report calls fine AND that have every expected section
         # (the report allows e.g. a missing 10-K 7A; here we want all of them).
         if result and result["outcome"] == OK and expected_sections(record):
-            filing = record["filing"]
-            eligible[filing["form"]][filing["ticker"]].append(record)
+            if (filing["ticker"], filing["form"], filing["filed_date"]) not in exclude:
+                eligible[filing["form"]][filing["ticker"]].append(record)
 
     rng = random.Random(seed)
     chosen, used_tickers = [], set()
@@ -211,6 +220,9 @@ def main() -> int:
     parser.add_argument("--score", action="store_true", help="read the ticked boxes and print the accuracy")
     parser.add_argument("--force", action="store_true", help="overwrite an existing spot_check.md (loses your ticks!)")
     parser.add_argument("--verbose", action="store_true", help="with --score: list every section as correct/wrong")
+    parser.add_argument("--seed", type=int, default=SEED, help=f"random seed for the sample (default {SEED})")
+    parser.add_argument("--exclude", type=Path, nargs="*", default=[],
+                        help="earlier spot-check files: their filings are not picked again")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -221,11 +233,15 @@ def main() -> int:
         sys.exit(f"{args.out} already exists and may hold your checkmarks. Use --score to read it, or --force to overwrite.")
     with args.jsonl.open(encoding="utf-8") as f:
         records = [json.loads(line) for line in f if line.strip()]
-    chosen = pick_filings(records)
+    exclude = set()
+    for path in args.exclude:
+        exclude |= reviewed_filings(path.read_text(encoding="utf-8"))
+    chosen = pick_filings(records, seed=args.seed, exclude=exclude)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render(chosen), encoding="utf-8")
     sections = sum(len(expected_sections(r)) for r in chosen)
-    print(f"Wrote {args.out}: {len(chosen)} filings, {sections} sections to check.")
+    print(f"Wrote {args.out}: {len(chosen)} filings, {sections} sections to check (seed {args.seed}, "
+          f"{len(exclude)} earlier filings excluded).")
     return 0
 
 

@@ -81,13 +81,16 @@ def check_filing(record: dict) -> dict | None:
         result["outcome"] = MISS
         # A short section that only says "see pages 46-160" is a layout, not a parser miss.
         if result["too_short"] and not result["absent"] and form != "8-K":
-            as_sections = [Section(s["key"], s["title"], s["text"], s["source"]) for s in record["sections"]]
+            as_sections = [
+                Section(s["key"], s["title"], s["text"], s["source"], s.get("heading", "")) for s in record["sections"]
+            ]
+            by_key = {s.key: s for s in as_sections}
             pointers = set(find_cross_references(as_sections))
             if set(result["too_short"]) <= pointers:
                 result["outcome"] = NON_STANDARD
                 # key -> (how it points elsewhere, its text), for the layout breakdown
                 result["pointers"] = {
-                    key: (pointer_kind(sections[key]["text"]), sections[key]["text"]) for key in result["too_short"]
+                    key: (pointer_kind(by_key[key].body), by_key[key].body) for key in result["too_short"]
                 }
     return result
 

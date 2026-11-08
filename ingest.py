@@ -17,7 +17,9 @@ from datetime import date
 from pathlib import Path
 
 from edgar import EdgarClient, Filing
-from parse import Section, html_to_text, split_sections
+import re
+
+from parse import Section, html_to_text, split_sections, strip_page_noise
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger("ingest")
@@ -32,6 +34,16 @@ RELEVANT_KEYS = {
 # Exhibit files we can turn into text. Images, PDFs and XBRL files are skipped.
 TEXT_EXTENSIONS = (".htm", ".html", ".txt")
 
+# The SEC's packaging line at the top of an exhibit: type, sequence number, file name, type again.
+#   "EX-99.1 2 a8-kex991q1202112262020.htm EX-99.1"
+SEC_EXHIBIT_HEADER_RE = re.compile(r"[ \t]*EX-\d+(?:\.\d+)?[ \t]+\d+[ \t]+\S+\.(?:htm|html|txt)\b.*", re.IGNORECASE)
+
+
+def _strip_exhibit_header(text: str) -> str:
+    """Drop the SEC packaging line if it is the first line of the exhibit."""
+    first, _, rest = text.partition("\n")
+    return rest.lstrip("\n") if SEC_EXHIBIT_HEADER_RE.fullmatch(first) else text
+
 
 def _exhibit_section(client: EdgarClient, doc_type: str, url: str) -> Section | None:
     """Download one exhibit and wrap it as a Section, or return None if it has no text."""
@@ -41,6 +53,7 @@ def _exhibit_section(client: EdgarClient, doc_type: str, url: str) -> Section | 
         text = raw.decode("utf-8", errors="replace").strip()
     else:
         text = html_to_text(raw)
+    text = strip_page_noise(_strip_exhibit_header(text))
     if not text:
         return None
     return Section(key=doc_type, title=doc_type, text=text, source=doc_type)

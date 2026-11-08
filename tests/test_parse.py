@@ -160,13 +160,13 @@ def test_7_and_7a_do_not_merge():
     sections = sections_by_key(TEN_K)
     assert "Net sales increased" in sections["7"].text
     assert "interest rate risk" not in sections["7"].text
-    assert sections["7A"].text == "The Company is exposed to interest rate risk."
+    assert sections["7A"].body == "The Company is exposed to interest rate risk."
 
 
 def test_prose_mentioning_item_8_is_not_a_heading():
     sections = sections_by_key(TEN_K)
     assert PROSE_ITEM_8 in sections["7"].text
-    assert sections["8"].text == "Consolidated Statements of Operations follow."
+    assert sections["8"].body == "Consolidated Statements of Operations follow."
 
 
 def test_titles_come_from_lookup_table():
@@ -186,8 +186,8 @@ def test_char_count():
 def test_space_before_period_and_uppercase_headings():
     text = "ITEM 1A RISK FACTORS\nRisks here.\nItem 12 . Security Ownership\nOwners here."
     sections = sections_by_key(text)
-    assert sections["1A"].text == "Risks here."
-    assert sections["12"].text == "Owners here."
+    assert sections["1A"].body == "Risks here."
+    assert sections["12"].body == "Owners here."
 
 
 def test_repeated_page_headers_do_not_split_a_section():
@@ -242,7 +242,7 @@ N/A
 Item 5. Market
 Our stock trades on Nasdaq.
 """
-    assert sections_by_key(text)["4"].text == "N/A"
+    assert sections_by_key(text)["4"].body == "N/A"
 
 
 def test_other_forms_not_supported_yet():
@@ -282,11 +282,11 @@ def test_10q_keys_include_the_part():
 
 def test_10q_part_i_and_part_ii_item_1_stay_separate():
     sections = {s.key: s for s in split_sections(TEN_Q, "10-Q")}
-    assert sections["I-1"].text == "Condensed consolidated statements of operations."
-    assert sections["II-1"].text == "The Company is party to various legal proceedings."
-    # Known limit: the "PART II" banner stays at the end of the previous section.
-    # PART lines don't end sections, because some filers repeat "PART I" as a page header.
-    assert sections["I-2"].text == "Revenue grew 8% in the quarter.\n\nPART II — OTHER INFORMATION"
+    assert sections["I-1"].body == "Condensed consolidated statements of operations."
+    assert sections["II-1"].body == "The Company is party to various legal proceedings."
+    # PART lines don't end sections (some filers repeat "PART I" as a page header), but a
+    # trailing "PART II" banner is page furniture and is stripped from the end (round 3).
+    assert sections["I-2"].body == "Revenue grew 8% in the quarter."
     assert sections["II-1A"].title == "Risk Factors"
 
 
@@ -295,7 +295,7 @@ def test_10q_part_iii_is_not_part_ii():
     sections = {s.key: s for s in split_sections(text, "10-Q")}
     # "PART III" isn't a 10-Q part, so we are still in Part I, and "I-1" is a new item there.
     assert "II-1" not in sections
-    assert sections["I-1"].text == "Should stay in Part I."
+    assert sections["I-1"].body == "Should stay in Part I."
 
 
 # ---- 8-K items ------------------------------------------------------------
@@ -315,7 +315,7 @@ def test_8k_items():
     sections = split_sections(EIGHT_K, "8-K")
     assert [s.key for s in sections] == ["2.02", "7.01", "9.01"]
     assert sections[0].title == "Results of Operations and Financial Condition"
-    assert sections[0].text.startswith("On October 30, 2025")
+    assert sections[0].body.startswith("On October 30, 2025")
 
 
 def test_8k_item_number_is_not_cut_at_the_dot():
@@ -369,9 +369,9 @@ Item 9.01 | Financial Statements and Exhibits
 def test_8k_stacked_headings_share_the_next_body():
     # Regression (XOM 8-K): both headings sit on one shared body; 2.02 used to come back empty.
     sections = sections_by_key_for(STACKED_8K, "8-K")
-    assert sections["2.02"].text == sections["7.01"].text
-    assert sections["2.02"].text.startswith("The following information is furnished")
-    assert sections["9.01"].text == "(d) Exhibits."
+    assert sections["2.02"].body == sections["7.01"].body
+    assert sections["2.02"].body.startswith("The following information is furnished")
+    assert sections["9.01"].body == "(d) Exhibits."
 
 
 def test_8k_last_heading_with_no_text_is_still_dropped():
@@ -422,7 +422,7 @@ def test_long_heading_with_standard_title_is_accepted():
     )
     assert len(heading) > 150
     text = f"Item 6—Reserved\n{heading}\nOverview of the year.\nItem 7A—Quantitative and Qualitative Disclosures About Market Risk\nRates.\n"
-    assert sections_by_key(text)["7"].text == "Overview of the year."
+    assert sections_by_key(text)["7"].body == "Overview of the year."
 
 
 def test_missing_part_i_line_in_the_body_of_a_10q():
@@ -449,9 +449,9 @@ Item 2.Unregistered Sales of Equity Securities and Use of Proceeds
 None.
 """
     sections = sections_by_key_for(text, "10-Q")
-    assert sections["I-2"].text == "Streaming revenue grew."
-    assert sections["I-3"].text.startswith("Rates.")  # the PART II banner stays attached (known limit)
-    assert sections["II-1"].text == "None."
+    assert sections["I-2"].body == "Streaming revenue grew."
+    assert sections["I-3"].body == "Rates."  # the trailing PART II banner is stripped
+    assert sections["II-1"].body == "None."
 
 
 # ---- annual-report-style 10-Ks: no "Item N" headings, sections headed by their titles ----
@@ -519,13 +519,13 @@ def test_long_heading_with_a_variant_title_is_accepted():
     )
     assert len(heading) > 150
     text = f"Item 6—Reserved\n{heading}\nOverview of the year.\nItem 7A—Quantitative and Qualitative Disclosures About Market Risk\nRates.\n"
-    assert sections_by_key(text)["7"].text == "Overview of the year."
+    assert sections_by_key(text)["7"].body == "Overview of the year."
 
 
 def test_long_prose_starting_with_item_and_a_number_is_still_not_a_heading():
     prose = "Item 7 of this report contains management's analysis, which should be read together with the financial statements and notes."
     text = f"Item 7. Management's Discussion and Analysis\nFirst.\n{prose}\nSecond.\n"
-    assert sections_by_key(text)["7"].text == f"First.\n{prose}\nSecond."
+    assert sections_by_key(text)["7"].body == f"First.\n{prose}\nSecond."
 
 
 def make_pages(footer_for_page, n_pages=6):
@@ -565,7 +565,7 @@ def test_table_rows_are_not_mistaken_for_footers():
     # Consecutive two-cell rows whose numbers rise: not alone on their own line, so kept.
     rows = "\n".join(f"Revenue year | {n}" for n in range(1, 8))
     text = f"Item 7. Management's Discussion and Analysis\n\n{rows}\n"
-    assert sections_by_key(text)["7"].text == rows
+    assert sections_by_key(text)["7"].body == rows
 
 
 def test_pointer_without_a_page_number_is_a_cross_reference():
@@ -583,3 +583,136 @@ def test_pointer_without_a_page_number_is_a_cross_reference():
 def test_ordinary_short_section_with_the_word_see_is_not_a_cross_reference():
     text = "Item 7A. Quantitative and Qualitative Disclosures About Market Risk\nNot required. See our other disclosures.\n"
     assert find_cross_references(split_sections(text, "10-K")) == []
+
+
+# ---- round 3: regressions from the hand spot check (real lines from the filings) ----
+
+from parse import strip_page_noise  # noqa: E402
+
+XOM_REAL_END = "is not deemed to be furnished herewith or included in this filing."
+
+# XOM 8-K 2026-07-31, lines 63-88: stacked headings, no "Item 9.01", then the exhibit index
+# and the signature block.
+XOM_8K = """Item 2.02 | Results of Operations and Financial Condition
+Item 7.01 | Regulation FD Disclosure
+The following information is furnished pursuant to both Item 2.02 and Item 7.01.
+
+The Registrant hereby furnishes the information set forth in its News Release, dated July 31, 2026 , announcing second quarter 2026 results, a copy of which is included as Exhibit 99.1, and furnishes the information in the related 2Q26 Investor Relations Data Summary, a copy of which is included as Exhibit 99.2. Material available by hyperlink from the News Release is not deemed to be furnished herewith or included in this filing.
+
+3
+
+INDEX TO EXHIBITS
+
+Exhibit No. | Description
+99.1 | ExxonMobil Holdings Corporation News Release, dated July 31, 2026 , announcing second quarter 2026 results.
+99.2 | 2Q26 Investor Relations Data Summary.
+
+4
+
+SIGNATURE
+
+Pursuant to the requirements of the Securities Exchange Act of 1934, the registrant has duly caused this
+EXXONMOBIL HOLDINGS CORPORATION
+"""
+
+
+def test_8k_items_end_at_the_exhibit_index_and_signatures():
+    # Regression (XOM 8-K 2026-07-31): 2.02 ran through INDEX TO EXHIBITS and SIGNATURE.
+    sections = sections_by_key_for(XOM_8K, "8-K")
+    for key in ("2.02", "7.01"):
+        assert sections[key].body.endswith(XOM_REAL_END)  # the page number "3" is gone too
+        assert "INDEX TO EXHIBITS" not in sections[key].text
+        assert "SIGNATURE" not in sections[key].text
+    assert sections["2.02"].body == sections["7.01"].body  # stacked headings share one body
+
+
+def test_8k_signatures_alone_also_end_the_last_item():
+    text = "Item 8.01 Other Events\nThe board declared a dividend.\nSIGNATURES\nPursuant to the requirements\n"
+    assert sections_by_key_for(text, "8-K")["8.01"].body == "The board declared a dividend."
+
+
+def test_8k_combined_heading_on_one_line_gives_both_items_the_text():
+    for heading in ("Item 2.02 / Item 7.01 Results of Operations and Financial Condition; Regulation FD Disclosure",
+                    "Items 2.02 and 7.01. Results of Operations and Financial Condition; Regulation FD Disclosure"):
+        sections = sections_by_key_for(f"{heading}\nWe reported second quarter results.\nSIGNATURE\n", "8-K")
+        assert sections["2.02"].body == sections["7.01"].body == "We reported second quarter results."
+        assert sections["2.02"].heading == heading
+
+
+def test_8k_dividend_amount_in_a_heading_is_not_read_as_an_item_number():
+    # Only the number list right after "Item(s)" counts, not "$1.02" later in the line.
+    text = "Item 8.01 Other Events: a dividend of $1.02 per share\nThe board declared it.\n"
+    assert list(sections_by_key_for(text, "8-K")) == ["8.01"]
+
+
+def test_page_noise_at_the_end_of_a_section_is_removed():
+    # Real section endings from the spot check (UNH 7, DIS 1A, MSFT 1A, MSFT 7, NKE 1A, META EX-99.1).
+    cases = {
+        "there were no significant concentrations of credit risk.\n\n35\n\nTable of Contents": "credit risk.",
+        "which may discourage such lawsuits.\n\n27\n\nTABLE OF CONTENTS": "such lawsuits.",
+        "could be adversely affected.\n\n29\n\nPART I\n\nItem 1B, 1C": "adversely affected.",
+        "Corporate Vice President and Chief Accounting Officer\n\n48\n\nPART II": "Chief Accounting Officer",
+        "These provisions could also discourage proxy contests.\n\nTable of Contents": "proxy contests.",
+        "Free cash flow | 10,334 | 12,531\n\n9": "| 12,531",
+    }
+    for raw, real_end in cases.items():
+        assert strip_page_noise(raw).endswith(real_end), raw
+
+
+def test_page_break_in_the_middle_of_a_section_is_removed_but_footnote_numbers_stay():
+    raw = "First page text.\n\n35\n\nTable of Contents\n\nSecond page text.\n\n1\n\nA footnote."
+    assert strip_page_noise(raw) == "First page text.\n\nSecond page text.\n\n1\n\nA footnote."
+
+
+def test_a_table_row_ending_in_a_number_is_not_page_noise():
+    assert strip_page_noise("Revenue | 2025\nTotal | 9") == "Revenue | 2025\nTotal | 9"
+
+
+def test_heading_line_with_units_is_kept_as_the_first_line():
+    # Regression (COST 10-K): the heading holds the units of every number in the section.
+    heading = (
+        "Item 7—Management's Discussion and Analysis of Financial Conditions and Results of Operations "
+        "(amounts in millions, except per share, share, membership fee, and warehouse count data)"
+    )
+    section = sections_by_key(f"{heading}\nNet sales were $268,776.\nItem 7A—Quantitative and Qualitative Disclosures About Market Risk\nRates.\n")["7"]
+    assert section.text.split("\n")[0] == heading
+    assert section.heading == heading
+    assert section.body == "Net sales were $268,776."
+
+
+def test_title_line_that_opens_the_table_of_contents_is_not_the_mdna_heading():
+    # Regression (INTC 10-K 2026-01-23): Item 7 started in the main table of contents
+    # ("Management's Discussion and Analysis" followed by its sub-entries with page numbers),
+    # so it swallowed pages 1-17. The real MD&A starts at "Our MD&A begins with an overview ...".
+    filler = "Words that make the section long enough to count as a real section. " * 20
+    text = f"""Table of Contents
+Page
+Forward-Looking Statements | 1
+Our Business | 6
+Management's Discussion and Analysis
+Operating Segment Results | 21
+Consolidated Results of Operations | 25
+Liquidity and Capital Resources | 29
+Properties | 32
+Risk Factors | 37
+
+Forward-Looking Statements
+{filler}
+Our Business
+{filler}
+
+Management's Discussion and Analysis
+
+Overview
+
+Our MD&A begins with an overview of significant events and key developments in 2025 that meaningfully impacted our financial results.
+{filler}
+Risk Factors
+{filler}
+Cybersecurity
+{filler}
+"""
+    mdna = sections_by_key(text)["7"]
+    assert mdna.body.startswith("Overview\n\nOur MD&A begins with an overview of significant events")
+    assert "Operating Segment Results | 21" not in mdna.text
+    assert "Our Business" not in mdna.text

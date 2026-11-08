@@ -196,3 +196,14 @@ def test_an_unrecognised_checkbox_is_an_error_not_silently_skipped():
     _, errors = spot_check.read_reviews(odd)
     assert any("checkbox not recognised" in e for e in errors)
     assert any("CCC 8-K 2.02 has no" in e for e in errors)
+
+
+def test_a_new_sample_never_repeats_filings_already_reviewed():
+    records = make_records()
+    first = spot_check.pick_filings(records)
+    reviewed = spot_check.reviewed_filings(spot_check.render(first))
+    assert len(reviewed) == 20
+    second = spot_check.pick_filings(records, seed=7, exclude=reviewed)
+    picked = {(r["filing"]["ticker"], r["filing"]["form"], r["filing"]["filed_date"]) for r in second}
+    assert len(second) == 20
+    assert not picked & reviewed

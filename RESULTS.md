@@ -66,3 +66,12 @@ filings. Sections from one filing are not independent, so the interval is somewh
 - **Last 8-K item runs to the end of the document (XOM 2.02):** no "Item 9.01" heading, so 2.02
   includes the exhibit index and signatures; the combined "Item 2.02 / Item 7.01" heading also
   gives both items the same text. Found by spot check; not fixed.
+
+## Future work
+- **Resolve page pointers.** The 47 non-standard-layout filings (JPM 6 10-Ks and 17 10-Qs,
+  INTC 18 10-Qs, CVX 6 10-Ks) only contain a pointer to where the MD&A is ("appears on pages
+  46-160", "presented in the Financial Table of Contents"). They stay classified as
+  non-standard for now and are not recovered in this round. A fix would follow the pointer
+  inside the same document, probably by splitting on page numbers from the filer's own index and
+  the page footers. The same page-based split would also tighten the section ends of the
+  title-fallback filings (INTC 1A, 7, 7A).
