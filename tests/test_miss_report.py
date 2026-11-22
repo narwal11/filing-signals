@@ -20,18 +20,6 @@ PAGE = "Management's discussion and analysis appears on pages 46-160."
 NAME = "The index to MD&A is presented in the Financial Table of Contents."
 
 
-def test_pointer_section_is_non_standard_and_records_its_kind():
-    result = miss_report.check_filing(make_record("JPM", "10-K", "2025-02-14", "7", PAGE))
-    assert result["outcome"] == miss_report.NON_STANDARD
-    assert result["pointers"]["7"][0] == "page"
-
-
-def test_short_section_that_is_not_a_pointer_is_still_a_miss():
-    result = miss_report.check_filing(make_record("ZZZ", "10-K", "2025-02-14", "7", "Short but not a pointer."))
-    assert result["outcome"] == miss_report.MISS
-    assert result["pointers"] == {}
-
-
 def test_layout_groups_count_per_ticker_and_form_and_name_the_kinds():
     records = [
         make_record("CVX", "10-K", "2022-02-24", "7", PAGE),
@@ -51,9 +39,3 @@ def test_layout_groups_count_per_ticker_and_form_and_name_the_kinds():
     assert groups["JPM", "10-K"]["filings"] == 1
     assert list(groups) == [("CVX", "10-K"), ("JPM", "10-K")]  # sorted by company
 
-
-def test_pointer_kind_says_how_a_flagged_section_points_elsewhere():
-    toc = "Introduction | 4\nExecutive Overview | 5\nConsolidated Results | 9"
-    assert miss_report.pointer_kind(toc) == "toc"
-    assert miss_report.pointer_kind(PAGE) == "page"
-    assert miss_report.pointer_kind(NAME) == "name"

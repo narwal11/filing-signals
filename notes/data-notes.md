@@ -34,3 +34,13 @@ The rules for accessing Edgar are probably in place in order to ensure everyone 
   - 0001140361-26-015711 (Apr 2026): JSON 21:29:51Z = index 17:29:51 EDT (UTC-4)
 - For Phase 4: convert to America/New_York before comparing to market hours
   (9:30-16:00 ET). Accepted after 16:00 ET -> event day = next trading day.
+## Citation offsets (rule for Phase 2, set 2026-11-22)
+- A citation's `start_offset`/`end_offset` are always relative to the text of ONE
+  section (`citations.section_id`), never to a filing or a concatenated prompt.
+- Offsets are 0-based and half-open, like Python slicing: `text[start:end]`.
+  Postgres `substr` is 1-based: `substr(text, start + 1, end - start)`.
+- If an extraction input concatenates sections (e.g. 8-K Item 2.02 + EX-99.1), the
+  extraction code maps each offset back to its section, and subtracts that section's
+  start in the concatenated input, before saving.
+- `extractions.input_text_sha256` records the exact text the model saw. A citation
+  is only checkable against the section text whose `text_sha256` it was made from.

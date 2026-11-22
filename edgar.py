@@ -34,6 +34,9 @@ class Filing:
     report_date: date | None
     items: tuple[str, ...]  # 8-K item numbers, e.g. ("2.02", "9.01")
     primary_document: str
+    # The exact acceptanceDateTime string from the SEC (e.g. "2021-01-27T21:30:35.000Z"),
+    # kept next to the parsed accepted_at so the timestamp can be audited later.
+    accepted_at_raw: str | None = None
 
     @property
     def primary_url(self) -> str:
@@ -87,6 +90,7 @@ def _parse_filings(columns: dict, cik: int, ticker: str, company: str) -> list[F
                 # "2.02,9.01" -> ("2.02", "9.01"); "" -> ()
                 items=tuple(i.strip() for i in items.split(",") if i.strip()),
                 primary_document=document,
+                accepted_at_raw=accepted or None,
             )
         )
     return filings

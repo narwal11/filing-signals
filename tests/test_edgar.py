@@ -165,6 +165,7 @@ def test_items_and_dates_parsing(tmp_path):
     assert eight_k.items == ("2.02", "9.01")
     assert eight_k.report_date is None
     assert eight_k.accepted_at == datetime.fromisoformat("2022-04-28T16:30:00+00:00")
+    assert eight_k.accepted_at_raw == "2022-04-28T16:30:00.000Z"  # the exact SEC string, unparsed
     assert eight_k.company == "Apple Inc."
 
     ten_k = client.list_filings("AAPL", ["10-K"], since=date(2022, 1, 1))[0]
