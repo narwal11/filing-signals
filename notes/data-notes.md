@@ -25,3 +25,12 @@
 - Rate limit: Current max request rate: 10 requests/second | The SEC does not allow botnets or automated tools to crawl the site. Any request that has been identified as part of a botnet or an automated tool outside of the acceptable policy will be managed to ensure fair access for all users.
 
 The rules for accessing Edgar are probably in place in order to ensure everyone has equitable access to SEC EDGAR content The email lets the SEC contact me if my script misbehaves, instead of just blocking my IP.
+
+## Acceptance timestamp timezone (checked 2026-11-22)
+- EDGAR submissions JSON `acceptanceDateTime` is true UTC (the "Z" is correct).
+- The "Accepted" time on the filing index page is US Eastern time.
+- Evidence:
+  - 0001140361-26-042798 (Nov 2026): JSON 21:30:40Z = index 16:30:40 EST (UTC-5)
+  - 0001140361-26-015711 (Apr 2026): JSON 21:29:51Z = index 17:29:51 EDT (UTC-4)
+- For Phase 4: convert to America/New_York before comparing to market hours
+  (9:30-16:00 ET). Accepted after 16:00 ET -> event day = next trading day.
