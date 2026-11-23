@@ -567,7 +567,7 @@ PAGE_REFERENCE_RE = re.compile(
 TOC_LINE_RE = re.compile(r"\|\s*\d+\s*$")
 
 
-def _looks_like_table_of_contents(text: str) -> bool:
+def looks_like_table_of_contents(text: str) -> bool:
     """True if the text is mostly lines like "Executive Overview | 5"."""
     lines = [line for line in text.split("\n") if line.strip()]
     toc_lines = [line for line in lines if TOC_LINE_RE.search(line)]
@@ -589,5 +589,5 @@ def find_cross_references(sections: list[Section]) -> list[str]:
         for s in sections
         if s.key in CROSS_REFERENCE_KEYS
         and s.char_count <= MAX_CROSS_REFERENCE_CHARS
-        and (PAGE_REFERENCE_RE.search(s.body) or _looks_like_table_of_contents(s.body))  # not the heading
+        and (PAGE_REFERENCE_RE.search(s.body) or looks_like_table_of_contents(s.body))  # not the heading
     ]

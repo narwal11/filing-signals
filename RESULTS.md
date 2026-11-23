@@ -118,6 +118,13 @@ was checked by hand. Not fixed in round 3: no general fix was clean enough. Opti
   numbers. Most precise and also the base for resolving page pointers (Future work), but the
   biggest build.
 
+## Known limitations
+- **Amended filings are not ingested.** 10-K/A, 10-Q/A and 8-K/A are never downloaded: `edgar.list_filings`
+  matches form types exactly, and the `filings.form` CHECK constraint in `schema.sql` only allows
+  10-K, 10-Q and 8-K. An amendment can restate numbers the market saw, so this needs a decision
+  before Phase 4 (backtest). It affects no measured rate above: all counts here cover original filings only.
+- The INTC 10-K section ends are documented under "Root causes found" above.
+
 ## Future work
 - **Resolve page pointers.** The non-standard-layout filings (47 in round 2, 48 in round 3: JPM
   6 10-Ks and 18 10-Qs, INTC 18 10-Qs, CVX 6 10-Ks) only contain a pointer to where the MD&A is ("appears on pages

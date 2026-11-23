@@ -1,12 +1,8 @@
-import os
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
 
 import httpx
 import pytest
-
-# edgar.py reads this at import time; give it a dummy value so tests never need .env
-os.environ.setdefault("SEC_USER_AGENT", "test-agent test@example.com")
 
 import edgar
 import ingest
@@ -20,7 +16,7 @@ EARNINGS_8K = edgar.Filing(
     accession="0000320193-25-000077",
     form="8-K",
     filed_date=date(2025, 10, 30),
-    accepted_at=None,
+    accepted_at=datetime(2025, 10, 30, 20, 30, 12, tzinfo=timezone.utc),
     report_date=date(2025, 10, 30),
     items=("2.02", "9.01"),
     primary_document="aapl-8k.htm",
@@ -131,7 +127,7 @@ def submissions_json():
         "accessionNumber": [r[0] for r in rows],
         "form": [r[1] for r in rows],
         "filingDate": [r[2] for r in rows],
-        "acceptanceDateTime": [""] * len(rows),
+        "acceptanceDateTime": ["2025-10-30T20:30:12.000Z"] * len(rows),
         "reportDate": [""] * len(rows),
         "items": [r[3] for r in rows],
         "primaryDocument": [r[4] for r in rows],
@@ -171,6 +167,34 @@ def test_run_writes_one_line_per_filing_and_survives_a_failure(tmp_path):
     assert eight_k["filing"]["primary_url"].endswith("/aapl-8k.htm")
     assert [s["key"] for s in eight_k["sections"]] == ["2.02", "EX-99.1", "EX-99.2"]
     assert eight_k["sections"][0]["char_count"] == len(eight_k["sections"][0]["text"])
+
+
+def test_a_403_stops_the_run_instead_of_skipping_to_the_next_filing(tmp_path):
+    paths = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if "/Archives/" in request.url.path:
+            return httpx.Response(403)  # the SEC is blocking us
+        return httpx.Response(200, text=ROUTES[request.url.path]) if request.url.path in ROUTES else httpx.Response(404)
+
+    client = edgar.EdgarClient(httpx.Client(transport=httpx.MockTransport(handler)), cache_dir=tmp_path / "cache")
+    with pytest.raises(edgar.SecAccessDeniedError):
+        ingest.run(client, ["AAPL"], ["10-K", "8-K"], None, tmp_path / "filings.jsonl")
+    assert sum("/Archives/" in p for p in paths) == 1  # one blocked request, then nothing more
+
+
+def test_filing_without_an_acceptance_time_is_skipped_and_counted(tmp_path, monkeypatch):
+    client, paths = make_client(tmp_path / "cache")
+    no_time = replace(EARNINGS_8K, accepted_at=None)
+    monkeypatch.setattr(ingest, "select_filings", lambda *args: [no_time])
+    out = tmp_path / "filings.jsonl"
+    stats = ingest.run(client, ["AAPL"], ["8-K"], None, out)
+
+    assert stats.no_accepted_at == 1
+    assert stats.failed == 0 and not stats.ok
+    assert read_lines(out) == []  # nothing written
+    assert paths == []  # and the document was never downloaded
 
 
 def test_rerun_skips_finished_filings_and_retries_failures(tmp_path):
@@ -232,3 +256,16 @@ def test_sec_exhibit_header_line_is_removed():
 def test_exhibit_without_a_header_line_is_unchanged():
     text = "Exhibit 99.1\nApple Reports First Quarter Results"
     assert ingest._strip_exhibit_header(text) == text
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "abc", "1.5"])
+def test_max_per_ticker_must_be_a_whole_number_of_at_least_one(value, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        ingest.parse_args(["--tickers", "AAPL", "--max-per-ticker", value])
+    assert exit_info.value.code == 2  # argparse's "bad command line" exit code
+    assert "--max-per-ticker" in capsys.readouterr().err
+
+
+def test_max_per_ticker_accepts_a_positive_number():
+    assert ingest.parse_args(["--tickers", "AAPL", "--max-per-ticker", "2"]).max_per_ticker == 2
+    assert ingest.parse_args(["--tickers", "AAPL"]).max_per_ticker is None

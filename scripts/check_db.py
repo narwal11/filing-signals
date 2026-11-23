@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import psycopg
+from psycopg import sql
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -48,7 +49,7 @@ def expected_from_jsonl(path: Path) -> dict:
 
 
 def actual_from_db(conn) -> dict:
-    one = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
+    one = lambda query: conn.execute(query).fetchone()[0]  # noqa: E731
     return {
         "companies": one("SELECT count(*) FROM companies"),
         "filings": one("SELECT count(*) FROM filings"),
@@ -63,7 +64,10 @@ def actual_from_db(conn) -> dict:
 def snapshot(conn) -> dict:
     """Everything a reload must leave unchanged."""
     return {
-        "counts": {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in TABLES},
+        "counts": {
+            t: conn.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(t))).fetchone()[0]
+            for t in TABLES
+        },
         "sum(char_count)": conn.execute("SELECT coalesce(sum(char_count), 0) FROM sections").fetchone()[0],
         "section ids": dict(
             ((accession, key), id_) for id_, accession, key in conn.execute("SELECT id, accession, key FROM sections")

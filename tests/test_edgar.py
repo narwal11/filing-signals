@@ -1,11 +1,7 @@
-import os
 from datetime import date, datetime
 
 import httpx
 import pytest
-
-# edgar.py reads this at import time; give it a dummy value so tests never need .env
-os.environ.setdefault("SEC_USER_AGENT", "test-agent test@example.com")
 
 import edgar
 
@@ -184,6 +180,24 @@ def test_second_get_uses_disk_cache(tmp_path):
     assert (tmp_path / DOC_PATH.lstrip("/")).exists()
 
 
+def test_crash_while_caching_leaves_no_cache_file(tmp_path, monkeypatch):
+    client, paths = make_edgar(tmp_path)
+    cached = tmp_path / DOC_PATH.lstrip("/")
+
+    def crash(src, dst):
+        raise OSError("simulated crash before the rename")
+
+    monkeypatch.setattr(edgar.os, "replace", crash)
+    with pytest.raises(OSError):
+        client.get(DOC_URL)
+    assert not cached.exists()  # the final path is never half-written
+
+    monkeypatch.undo()
+    assert client.get(DOC_URL) == b"<html>10-K body</html>"  # the next run downloads it again
+    assert cached.read_bytes() == b"<html>10-K body</html>"
+    assert paths == [DOC_PATH, DOC_PATH]
+
+
 def test_submissions_are_not_cached(tmp_path):
     client, paths = make_edgar(tmp_path)
     client.list_filings("AAPL", ["10-K"], since=date(2021, 1, 1))
@@ -223,6 +237,36 @@ def test_gives_up_after_max_retries(tmp_path, sleeps):
         client.get(DOC_URL)
     assert len(paths) == 6  # 1 try + 5 retries
     assert [s for s in sleeps if s >= 1] == [1, 2, 4, 8, 16]
+
+
+def test_403_is_not_retried_and_says_what_to_check(tmp_path, sleeps):
+    client, paths = make_edgar(tmp_path, handler=lambda request: httpx.Response(403))
+    with pytest.raises(edgar.SecAccessDeniedError, match="SEC_USER_AGENT"):
+        client.get(DOC_URL)
+    assert len(paths) == 1  # one request only: retrying while blocked makes it worse
+    assert [s for s in sleeps if s >= 1] == []
+
+
+def test_retry_after_longer_than_the_backoff_is_waited(tmp_path, sleeps):
+    responses = [httpx.Response(429, headers={"Retry-After": "7"}), httpx.Response(200, content=b"ok")]
+    client, _ = make_edgar(tmp_path, handler=lambda request: responses.pop(0))
+    assert client.get(DOC_URL) == b"ok"
+    assert [s for s in sleeps if s >= 1] == [7]  # the normal backoff would have been 1
+
+
+def test_retry_after_is_capped(tmp_path, sleeps):
+    responses = [httpx.Response(503, headers={"Retry-After": "3600"}), httpx.Response(200, content=b"ok")]
+    client, _ = make_edgar(tmp_path, handler=lambda request: responses.pop(0))
+    client.get(DOC_URL)
+    assert [s for s in sleeps if s >= 1] == [edgar.MAX_RETRY_AFTER]
+
+
+def test_retry_after_as_a_date_falls_back_to_the_normal_backoff(tmp_path, sleeps):
+    date_header = {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}
+    responses = [httpx.Response(429, headers=date_header), httpx.Response(200, content=b"ok")]
+    client, _ = make_edgar(tmp_path, handler=lambda request: responses.pop(0))
+    client.get(DOC_URL)
+    assert [s for s in sleeps if s >= 1] == [1]
 
 
 def test_connection_error_is_retried(tmp_path):
@@ -317,3 +361,26 @@ def test_exhibits_parses_index_page(tmp_path):
         ("GRAPHIC", base + "logo.jpg"),
     ]
     assert paths == [INDEX_PATH]
+
+
+# ---- SEC_USER_AGENT -------------------------------------------------------
+
+
+def test_a_real_client_sends_the_user_agent_from_the_environment(tmp_path):
+    client = edgar.EdgarClient(cache_dir=tmp_path)  # no mocked client: it builds its own httpx.Client
+    assert client._http.headers["User-Agent"] == "test-agent test@example.com"
+    client.close()
+
+
+def test_missing_user_agent_is_a_clear_error_when_the_client_is_created(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEC_USER_AGENT")
+    monkeypatch.setattr(edgar, "load_dotenv", lambda: None)  # a real .env on this machine must not fill it in
+    with pytest.raises(RuntimeError, match="SEC_USER_AGENT is not set"):
+        edgar.EdgarClient(cache_dir=tmp_path)
+
+
+def test_a_mocked_client_needs_no_user_agent(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEC_USER_AGENT")
+    monkeypatch.setattr(edgar, "load_dotenv", lambda: None)
+    client, _ = make_edgar(tmp_path)
+    assert client.ticker_to_cik("AAPL") == 320193

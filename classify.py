@@ -10,9 +10,9 @@ Input is one record of data/filings.jsonl: {"filing": {...}, "sections": [...], 
 
 import re
 
-# _looks_like_table_of_contents is reused (not copied) so this module and parse.py can never
+# looks_like_table_of_contents is reused (not copied) so this module and parse.py can never
 # disagree about what a table of contents is.
-from parse import Section, _looks_like_table_of_contents, find_cross_references
+from parse import Section, looks_like_table_of_contents, find_cross_references
 
 # form -> {required section key: minimum characters for it to count as a real section}.
 REQUIRED = {
@@ -91,7 +91,7 @@ def pointer_kind(text: str) -> str:
       "page" - names pages: "appears on pages 46-160"
       "name" - names a place without a page: "presented in the Financial Table of Contents"
     """
-    if _looks_like_table_of_contents(text):
+    if looks_like_table_of_contents(text):
         return "toc"
     if re.search(r"\bpages?\s+\d+", text, re.IGNORECASE):
         return "page"

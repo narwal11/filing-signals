@@ -10,16 +10,20 @@ import httpx
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-load_dotenv()  # reads your .env file
-HEADERS = {"User-Agent": os.environ["SEC_USER_AGENT"]}
-
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
 SEC_BASE_URL = "https://www.sec.gov"
 
 MAX_REQUESTS_PER_SECOND = 8  # SEC limit is 10; we stay under it
-RETRY_STATUSES = {403, 429, 500, 502, 503, 504}
+# 403 is not here: the SEC sends it for a bad User-Agent or a blocked IP, and retrying only
+# keeps hitting the SEC while we are blocked. See SecAccessDeniedError.
+RETRY_STATUSES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5  # 1 first try + 5 retries = 6 attempts at most
+MAX_RETRY_AFTER = 60  # never wait longer than this many seconds, even if the SEC asks for more
+
+
+class SecAccessDeniedError(Exception):
+    """The SEC answered 403. Callers should stop making requests, not skip to the next filing."""
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,31 @@ def _parse_filings(columns: dict, cik: int, ticker: str, company: str) -> list[F
     return filings
 
 
+def _user_agent() -> str:
+    """The contact string the SEC requires on every request, from SEC_USER_AGENT (or the .env file).
+
+    Read when a client is created, not when this module is imported, so importing edgar
+    (for example in a test) never needs the variable.
+    """
+    load_dotenv()  # fills in variables from .env; never overrides ones already set
+    value = os.environ.get("SEC_USER_AGENT", "").strip()
+    if not value:
+        raise RuntimeError(
+            "SEC_USER_AGENT is not set. Put a line like 'SEC_USER_AGENT=Your Name your.email@example.com' "
+            "in .env: the SEC requires a contact string on every request."
+        )
+    return value
+
+
+def _retry_after_seconds(response: httpx.Response) -> int:
+    """Seconds the server asked us to wait (Retry-After header), capped; 0 if absent or not a number.
+
+    The header can also be a date; that form is ignored and the normal backoff applies.
+    """
+    value = response.headers.get("Retry-After", "")
+    return min(int(value), MAX_RETRY_AFTER) if value.isdigit() else 0
+
+
 class EdgarClient:
     """Talks to the SEC. Every request goes through get(), which handles
     the disk cache, rate limit, and retries in one place."""
@@ -103,7 +132,7 @@ class EdgarClient:
     def __init__(self, client: httpx.Client | None = None, cache_dir: Path = Path("data/cache")):
         # `client` and `cache_dir` are parameters so tests can pass in a mocked
         # client and a temporary folder.
-        self._http = client or httpx.Client(headers=HEADERS, timeout=30)
+        self._http = client or httpx.Client(headers={"User-Agent": _user_agent()}, timeout=30)
         self._cache_dir = cache_dir
         self._last_request = 0.0  # time.monotonic() of the last real request
         self._ticker_map = None  # {ticker: cik}, filled on first lookup
@@ -138,7 +167,11 @@ class EdgarClient:
 
         if cache:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(body)
+            # Write to a temp file, then rename it into place. The rename is all-or-nothing, so an
+            # interrupted run can never leave a half-written file that a later run reads as a cache hit.
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_bytes(body)
+            os.replace(tmp, path)
         return body
 
     def _wait_for_slot(self):
@@ -153,6 +186,8 @@ class EdgarClient:
         """Download `url`, retrying temporary failures with exponential backoff."""
         for attempt in range(MAX_RETRIES + 1):
             last_attempt = attempt == MAX_RETRIES
+            # Wait 1s, 2s, 4s, 8s, 16s: the delay doubles after every failure.
+            delay = 2**attempt
             self._wait_for_slot()
             try:
                 response = self._http.get(url)
@@ -160,13 +195,20 @@ class EdgarClient:
                 if last_attempt:
                     raise
             else:
+                if response.status_code == 403:
+                    raise SecAccessDeniedError(
+                        f"HTTP 403 from {url}. Check that SEC_USER_AGENT is 'Your Name email@example.com'. "
+                        "If it is, the SEC may have blocked this IP for going over its rate limit "
+                        "(usually lifted after about 10 minutes)."
+                    )
                 if response.status_code not in RETRY_STATUSES:
                     response.raise_for_status()  # e.g. 404: retrying won't help
                     return response.content
                 if last_attempt:
                     response.raise_for_status()
-            # Wait 1s, 2s, 4s, 8s, 16s: the delay doubles after every failure.
-            time.sleep(2**attempt)
+                # If the server says how long to wait, wait at least that long.
+                delay = max(delay, _retry_after_seconds(response))
+            time.sleep(delay)
 
     def _get_json(self, url: str) -> dict:
         # Submissions change daily, so they are never cached on disk.

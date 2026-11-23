@@ -2,8 +2,11 @@
 The live load is checked by scripts/check_db.py."""
 
 import hashlib
+import json
 import re
 from datetime import date, datetime, timezone
+
+import pytest
 
 import db
 
@@ -84,3 +87,34 @@ def test_upserts_skip_unchanged_rows():
     assert "IS DISTINCT FROM" in db.UPSERT_FILING
     assert "IS DISTINCT FROM" in db.UPSERT_SECTION
     assert "IS DISTINCT FROM" in db.UPSERT_COMPANY
+
+
+# conn=None below: both records fail before any database call, so no database is needed.
+
+
+def test_load_jsonl_reports_the_line_number_of_a_bad_json_line(tmp_path):
+    path = tmp_path / "filings.jsonl"
+    path.write_text("\n{this is not json}\n", encoding="utf-8")  # a blank line 1 still counts
+    with pytest.raises(json.JSONDecodeError) as error:
+        db.load_jsonl(None, path)
+    assert any("line 2" in note for note in error.value.__notes__)
+
+
+def test_load_jsonl_reports_the_line_number_of_a_record_it_cannot_convert(tmp_path):
+    record = make_record()
+    record["filing"]["accepted_at"] = None  # ingest no longer writes these, but an old file might have them
+    path = tmp_path / "filings.jsonl"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    with pytest.raises(TypeError) as error:
+        db.load_jsonl(None, path)
+    assert any("line 1" in note and str(path) in note for note in error.value.__notes__)
+
+
+def test_duplicate_section_keys_raise_instead_of_overwriting():
+    record = make_record(form="8-K", items=["2.02"], sections=[
+        section("EX-99.1", "first press release", source="EX-99.1"),
+        section("EX-99.1", "second, different document", source="EX-99.1"),
+        section("2.02", "body"),
+    ])
+    with pytest.raises(ValueError, match=r"0000320193-21-000009.*duplicate section keys \['EX-99.1'\]"):
+        db.record_to_rows(record)

@@ -10,15 +10,14 @@ Safe to stop and re-run: accession numbers already in the output file are skippe
 import argparse
 import json
 import logging
+import re
 import sys
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
 
-from edgar import EdgarClient, Filing
-import re
-
+from edgar import EdgarClient, Filing, SecAccessDeniedError
 from parse import Section, html_to_text, split_sections, strip_page_noise
 
 ROOT = Path(__file__).resolve().parent
@@ -96,6 +95,7 @@ class Stats:
     failed_tickers: int = 0  # tickers whose filing list could not be fetched
     no_sections: int = 0  # filings processed fine but no wanted section was found
     skipped: int = 0  # filings already in the output file
+    no_accepted_at: int = 0  # filings the SEC gave no acceptance time for (not written: db.py needs it)
 
 
 def read_tickers(cli_tickers: list[str], tickers_file: Path | None) -> list[str]:
@@ -187,6 +187,8 @@ def run(
         for ticker in tickers:
             try:
                 filings = select_filings(client, ticker, forms, since, earnings_only, max_per_ticker)
+            except SecAccessDeniedError:
+                raise  # blocked by the SEC: stop the whole run instead of trying the next ticker
             except Exception as error:
                 stats.failed_tickers += 1
                 log.error("%s: could not list filings: %r", ticker, error, exc_info=log.isEnabledFor(logging.DEBUG))
@@ -195,12 +197,19 @@ def run(
 
             for filing in filings:
                 label = f"{ticker} {filing.form} {filing.filed_date} {filing.accession}"
+                if filing.accepted_at is None:
+                    # The point-in-time backtest needs the exact time a filing became public.
+                    stats.no_accepted_at += 1
+                    log.warning("%s: no acceptance time from the SEC; skipping", label)
+                    continue
                 if filing.accession in done:
                     stats.skipped += 1
                     log.debug("%s: already done, skipping", label)
                     continue
                 try:
                     sections, item_keys_found = process_with_keys(client, filing)
+                except SecAccessDeniedError:
+                    raise  # same: every later request would be blocked too
                 except Exception as error:
                     stats.failed += 1
                     log.error("%s: failed: %r", label, error, exc_info=log.isEnabledFor(logging.DEBUG))
@@ -231,6 +240,18 @@ def print_summary(stats: Stats):
     print(f"  failed:      {stats.failed} filings, {stats.failed_tickers} tickers")
     print(f"  no_sections: {stats.no_sections}")
     print(f"  skipped:     {stats.skipped} (already in the output file)")
+    print(f"  no time:     {stats.no_accepted_at} (SEC gave no acceptance time; not written)")
+
+
+def positive_int(text: str) -> int:
+    """argparse type: a whole number of at least 1."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or more, got {value}")
+    return value
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -241,7 +262,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--since", type=date.fromisoformat, default=date(2021, 1, 1),
                         help="only filings on or after this date, YYYY-MM-DD (default: 2021-01-01)")
     parser.add_argument("--jsonl", type=Path, default=Path("data/filings.jsonl"), help="output file (appended to)")
-    parser.add_argument("--max-per-ticker", type=int, metavar="N",
+    parser.add_argument("--max-per-ticker", type=positive_int, metavar="N",
                         help="only the most recent N filings of each form per ticker (handy for trial runs)")
     parser.add_argument("--all-8ks", action="store_true", help="include 8-Ks without Item 2.02 (default: earnings only)")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging, with tracebacks")
@@ -266,16 +287,20 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit(f"Cannot read the tickers file: {error}")
     log.info("%d tickers, forms %s, since %s", len(tickers), " ".join(args.forms), args.since)
 
-    with EdgarClient(cache_dir=ROOT / "data" / "cache") as client:
-        stats = run(
-            client,
-            tickers,
-            args.forms,
-            args.since,
-            args.jsonl,
-            earnings_only=not args.all_8ks,
-            max_per_ticker=args.max_per_ticker,
-        )
+    try:
+        with EdgarClient(cache_dir=ROOT / "data" / "cache") as client:
+            stats = run(
+                client,
+                tickers,
+                args.forms,
+                args.since,
+                args.jsonl,
+                earnings_only=not args.all_8ks,
+                max_per_ticker=args.max_per_ticker,
+            )
+    except SecAccessDeniedError as error:
+        # Every finished filing is already on disk (run() flushes after each one); re-running resumes.
+        sys.exit(f"Stopped: {error}")
     print_summary(stats)
     return 1 if stats.failed or stats.failed_tickers else 0
 

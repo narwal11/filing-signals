@@ -50,6 +50,12 @@ def record_to_rows(record: dict) -> dict:
     Returns {"company": (cik, name), "ticker": (cik, ticker), "filing": {...}, "sections": [{...}, ...]}.
     """
     filing = record["filing"]
+    # (accession, key) is unique in the database, so two sections with one key would silently
+    # overwrite each other (e.g. two documents both typed EX-99.1). Refuse instead.
+    keys = [s["key"] for s in record["sections"]]
+    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    if duplicates:
+        raise ValueError(f"{filing['accession']}: duplicate section keys {duplicates}; each key must appear once")
     # One call decides both filing flags and the pointer kinds, the same way miss_report.py does.
     result = classify.check_filing(record)  # None for filings it doesn't check
     non_standard = result is not None and result["outcome"] == classify.NON_STANDARD
@@ -194,10 +200,15 @@ def load_jsonl(conn: psycopg.Connection, path: Path = DEFAULT_JSONL, progress: b
     """Load every record of a filings.jsonl file. Safe to run again: unchanged rows are not rewritten."""
     totals = {"records": 0, "filings_changed": 0, "sections_changed": 0, "sections_deleted": 0}
     with path.open(encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, start=1):
             if not line.strip():
                 continue
-            changed = load_rows(conn, record_to_rows(json.loads(line)))
+            try:
+                changed = load_rows(conn, record_to_rows(json.loads(line)))
+            except Exception as error:
+                # add_note keeps the original exception type and shows the note in the traceback.
+                error.add_note(f"while loading {path}, line {line_number}")
+                raise
             totals["records"] += 1
             for name, n in changed.items():
                 totals[name] += n
