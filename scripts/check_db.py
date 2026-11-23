@@ -1,12 +1,20 @@
-"""Live check of the Postgres load against data/filings.jsonl (hits the real database).
+"""Check the Postgres database against data/filings.jsonl (live: connects to the real database).
 
-Usage:
-    python scripts/check_db.py            # compare the database with the JSONL file
-    python scripts/check_db.py --reload   # also run load_jsonl again and confirm nothing changed
-    python scripts/check_db.py --safety-test  # RESTRICT / stale-section checks, rolled back
+What it does: counts companies, filings, sections and characters in the database and compares
+each with the number computed from the JSONL file (not typed in, so the check stays correct
+when the file grows). It also confirms every raw timestamp equals its parsed one, re-hashes
+every section's text in SQL, checks that row-level security is on for every table, and prints
+table sizes.
 
-Expected values are computed from the JSONL file, not typed in, so the check stays
-correct when the file grows.
+When to use it: after `python db.py --load`, to prove the load is complete and correct.
+Add --reload to prove that loading a second time changes nothing, or --safety-test to prove
+the foreign keys and stale-section deletion work (done inside a transaction that is rolled
+back, so nothing is kept). Needs DATABASE_URL in .env.
+
+Example:
+    python scripts/check_db.py
+    python scripts/check_db.py --reload
+    python scripts/check_db.py --safety-test
 """
 
 import argparse

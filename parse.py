@@ -112,7 +112,7 @@ class Section:
     key: str  # item number, e.g. "1A"
     title: str  # standard item name, e.g. "Risk Factors"
     text: str  # the heading line, then the section body (exhibits have no heading line)
-    source: str = "primary"  # which document it came from (8-Ks will also use exhibits)
+    source: str = "primary"  # which document it came from: "primary", or the exhibit type (e.g. "EX-99.1")
     heading: str = ""  # the heading line as written, e.g. "Item 7—MD&A ... (amounts in millions ...)"
 
     @property

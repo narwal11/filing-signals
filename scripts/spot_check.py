@@ -1,12 +1,23 @@
-"""Hand-check a random sample of extracted sections.
+"""Hand-check a random sample of extracted sections, then score the result.
 
-Usage (from anywhere):
-    python scripts/spot_check.py            # write data/spot_check.md with 20 filings to review
-    python scripts/spot_check.py --score    # read your checkmarks and print accuracy with a 95% interval
+What it does: picks 20 filings with a fixed random seed (7 10-K, 7 10-Q, 6 8-K, only filings
+where every expected section was found) and writes data/spot_check.md: for each section, its
+URL, the first and last 200 characters, and a checkbox. After you tick the boxes, --score
+prints the accuracy with a 95% Wilson interval. Unticked boxes count as wrong.
 
-Open data/spot_check.md, compare each section's start and end with the filing at its URL, and
-tick "- [x] correct" if the section starts where it should and ends where it should.
-Leave the box empty if it is wrong. (Unticked boxes are counted as wrong.)
+When to use it: after a parser change, to measure whether section starts and ends are right.
+miss_report.py cannot see a section that was found but cut in the wrong place. Use --seed and
+--exclude for a fresh sample that skips filings you already reviewed (a sample used to find
+bugs is not a fair "after" measurement).
+
+How to review: open data/spot_check.md, compare each section's start and end with the filing
+at its URL, and tick "- [x] correct" if it starts and ends where it should. Leave the box
+empty if it is wrong.
+
+Example:
+    python scripts/spot_check.py            # write data/spot_check.md
+    python scripts/spot_check.py --score    # read your ticks, print accuracy
+    python scripts/spot_check.py --seed 7 --exclude data/spot_check.md --out data/spot_check_b.md
 """
 
 import argparse

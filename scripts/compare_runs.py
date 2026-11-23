@@ -1,12 +1,16 @@
 """Compare two ingest outputs filing by filing, to see exactly what a parser change did.
 
-Usage (from anywhere):
-    python scripts/compare_runs.py data/filings_old.jsonl data/filings.jsonl
+What it does: matches filings by accession number and reports (1) filings whose set of
+sections changed (keys added or removed), with the likely reason, (2) filings where a
+section's length changed by more than 5%, and (3) how many filings were identical or only
+cleaned up slightly (footers, whitespace). It reads two JSONL files: no network.
 
-Matches filings by accession number and reports:
-  - filings whose set of sections changed (keys added or removed), with the likely reason,
-  - filings where a section's length changed by more than 5%,
-  - how many filings were identical or only changed slightly (footers, whitespace).
+When to use it: before and after a change to parse.py. Copy data/filings.jsonl to
+data/filings_old.jsonl, change the parser, ingest into a new file (documents come from the
+disk cache), then compare, to check the change did only what you meant.
+
+Example:
+    python scripts/compare_runs.py data/filings_old.jsonl data/filings.jsonl
 """
 
 import argparse

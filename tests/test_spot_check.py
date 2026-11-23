@@ -186,7 +186,7 @@ def test_section_without_a_checkbox_is_an_error_and_no_score(tmp_path, capsys):
 
 def test_two_checkboxes_under_one_section_is_an_error():
     doubled = REVIEWED.replace("- [x] correct | 35 Table of Contents footer", "- [x] correct\n\n- [ ] correct")
-    reviews, errors = spot_check.read_reviews(doubled)
+    _, errors = spot_check.read_reviews(doubled)
     assert any("no section header above it" in e for e in errors)
     assert any("counts don't add up" in e for e in errors)
 

@@ -1,12 +1,16 @@
 """Report how often expected sections are missing from the output of ingest.py.
 
-Usage (from anywhere):
-    python scripts/miss_report.py [data/filings.jsonl] [--top 15]
+What it does: reads data/filings.jsonl and counts, per form, the filings that are fine ("ok"),
+missing a required section ("absent"), have one that is too short ("too short"), or only point
+to text elsewhere ("non-standard layout", e.g. JPM). Then it lists the optional sections, SEC
+metadata mismatches, and the worst filings with URLs so you can open them.
 
-Per form: how many filings are fine, how many are missing a required section ("absent"),
-how many have one that is shorter than a real section would be ("too short"), and how many
-only point to text elsewhere ("non-standard layout", e.g. JPM). Then the optional sections,
-SEC metadata mismatches, and the worst filings with URLs so you can open them.
+When to use it: after every ingest run or parser change, to get the miss rates that go into
+RESULTS.md. It only reads the file: no network, no database.
+
+Example:
+    python scripts/miss_report.py
+    python scripts/miss_report.py data/filings_old.jsonl --top 5
 """
 
 import argparse

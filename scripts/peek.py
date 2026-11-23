@@ -1,10 +1,15 @@
-"""Look at how a filing converts to text.
+"""Look at how one filing converts to text.
 
-Usage (from anywhere):
+What it does: downloads the latest filing of the given form for a ticker (filed in the last
+400 days), converts it with parse.html_to_text, saves the whole text to
+data/peek/<TICKER>-<form>.txt and prints the first 80 lines.
+
+When to use it: when a section comes out wrong and you want to see the text the splitter
+actually received (where the headings are, what a table turned into). It hits the real SEC,
+which is why it is a script and not a test.
+
+Example:
     python scripts/peek.py AAPL 10-K
-
-Downloads the latest filing of that form, saves the text to data/peek/<ticker>-<form>.txt
-and prints the first 80 lines. This hits the real SEC, which is why it is a script and not a test.
 """
 
 import argparse
