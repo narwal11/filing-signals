@@ -2,8 +2,10 @@
 
 ## Phase 1: Section extraction coverage
 
-**Dataset:** 25 large-cap tickers, filings since 2021-01-01:
+**Dataset (rounds 0-2):** 25 large-cap tickers, filings since 2021-01-01:
 142 10-Ks, 422 10-Qs, 583 earnings 8-Ks (Item 2.02).
+**Dataset (round 3, current):** the same 25 tickers: 143 10-Ks, 430 10-Qs, 587 earnings 8-Ks
+(see the note on round 3 totals below).
 
 **Expected sections:**
 - 10-K: Item 1A (Risk Factors), Item 7 (MD&A), Item 7A (Market Risk)
@@ -38,18 +40,24 @@ market risk into MD&A). 6 earnings 8-Ks were resolved by redefining coverage: 5 
 via substantial 8-K body text (CVX ×2, BAC, GS, PFE) and 1 flagged as an SEC metadata
 mismatch (PFE 2023-12-14).
 
-**Non-standard layouts are excluded from the miss rate but reported here:** 12 of 142
-10-Ks (8.5%) and 35 of 422 10-Qs (8.3%) use layouts the parser does not split (e.g., JPM's
-cross-reference format). **Usable coverage** (all expected sections found):
-10-K 91.5% (130/142), 10-Q 91.7% (387/422), 8-K 100.0% (583/583).
+**Non-standard layouts are excluded from the miss rate but reported here.** Round 3 (current):
+12 of 143 10-Ks (8.4%) and 36 of 430 10-Qs (8.4%), 48 filings in all, use layouts the parser
+does not split (e.g., JPM's cross-reference format). **Usable coverage** (all expected sections
+found), round 3: 10-K 91.6% (131/143), 10-Q 91.6% (394/430), 8-K 100.0% (587/587).
 
-All 47 non-standard filings come from 3 companies whose MD&A section is only a pointer
-to text elsewhere in the filing: JPM (6 10-Ks, 17 10-Qs), INTC (18 10-Qs), CVX (6 10-Ks).
+All 48 non-standard filings come from 3 companies whose MD&A section is only a pointer
+to text elsewhere in the filing: JPM (6 10-Ks, 18 10-Qs), INTC (18 10-Qs), CVX (6 10-Ks).
 Their earnings 8-K press releases are fully covered, so all 25 companies still have
 earnings text for Phase 2.
 
-Optional sections: 10-K Item 7A found in 95.8% (136/142); 10-Q Part II Item 1A found in
-87.2% (368/422).
+Round 2, for comparison: 12 of 142 10-Ks (8.5%) and 35 of 422 10-Qs (8.3%), 47 filings in all
+(JPM 6 10-Ks and 17 10-Qs, INTC 18 10-Qs, CVX 6 10-Ks); usable coverage 10-K 91.5% (130/142),
+10-Q 91.7% (387/422), 8-K 100.0% (583/583). The difference is the one new JPM 10-Q described in
+the note on round 3 totals.
+
+Optional sections, round 3 (current; `python scripts/miss_report.py`): 10-K Item 7A found in
+95.8% (137/143); 10-Q Part II Item 1A found in 87.0% (374/430). Round 2: 7A 95.8% (136/142);
+Part II Item 1A 87.2% (368/422).
 
 
 ## Phase 1: Spot-check accuracy (hand-checked)
@@ -64,8 +72,8 @@ filings where every expected section was found.
 | 3 (after fixes) | Sample B: 20 new filings (excluding sample A), 47 sections | 100.0% (21/21) | 100.0% (14/14) | 100.0% (12/12) | 100.0% (47/47), 95% Wilson interval 92.4% to 100.0% |
 
 Note: this is not comparable with the miss-rate table above. It measures whether the section
-boundaries are right, not whether a section was found, and it excludes the 48 non-standard-layout
-filings. Sections from one filing are not independent, so the interval is somewhat optimistic.
+boundaries are right, not whether a section was found, and it excludes the non-standard-layout
+filings (47 in round 2, 48 in round 3). Sections from one filing are not independent, so the interval is somewhat optimistic.
 
 Sample A was used to find and fix bugs, so it is not a fair "after" measurement.
 Sample B is a fresh random sample drawn after the fixes. Sample B happened to include
